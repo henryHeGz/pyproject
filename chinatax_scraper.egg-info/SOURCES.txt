@@ -1,0 +1,9 @@
+chinatax_scraper.py
+pyproject.toml
+chinatax_scraper.egg-info/PKG-INFO
+chinatax_scraper.egg-info/SOURCES.txt
+chinatax_scraper.egg-info/dependency_links.txt
+chinatax_scraper.egg-info/entry_points.txt
+chinatax_scraper.egg-info/requires.txt
+chinatax_scraper.egg-info/top_level.txt
+tests/test_scraper.py
