@@ -1,51 +1,92 @@
-# Chinatax Playwright Scraper
+# 国家税务总局数据采集工具集
 
-该项目提供了一个使用 [Playwright](https://playwright.dev/python/) 编写的命令行工具，用于采集 “国家税务总局-法律法规” 列表页面的数据。
+这是一个使用 [Playwright](https://playwright.dev/python/) 开发的数据采集工具集，用于从国家税务总局网站采集法律法规和留言公开数据。
+
+## 项目结构
+
+```
+pyproject/
+├── flfg_scraper/          # 法规库采集工具
+│   ├── chinatax_scraper.py              # 列表采集
+│   ├── chinatax_document_downloader.py   # 文档下载
+│   ├── chinatax_scheduler.py            # 调度器
+│   ├── chinatax_content_to_md.py        # 内容转Markdown
+│   └── README.md                         # 详细文档
+│
+├── comments_scraper/      # 留言公开采集工具
+│   ├── chinatax_comments_scraper.py     # 留言采集
+│   └── README.md                         # 详细文档
+│
+└── tests/                 # 测试文件
+```
 
 ## 功能概述
 
-- 采集列表中的序号、标题、发文字号、成文日期。
-- 将数据保存至本地 CSV 文件。
-- 启动时读取既有 CSV 数据并进行去重，仅追加未采集过的记录。
-- 自动翻页直至没有下一页。
+### 1. 法规库采集工具 ([flfg_scraper/](flfg_scraper/))
 
-## 使用方式
+采集国家税务总局法规库的法律法规数据：
 
-1. 安装依赖：
+- **列表采集**：提取标题、发文字号、成文日期、链接等信息
+- **文档下载**：下载法规正文和附件
+- **批量处理**：调度器支持批量下载和断点续传
+- **格式转换**：将内容转换为 Markdown 格式
 
-   ```bash
-   pip install .
-   playwright install
-   ```
+📖 [查看详细文档](flfg_scraper/README.md)
 
-   > **网络受限环境提示**：若 `pip install playwright` 因代理或 403 错误失败，可尝试：
-   >
-   > - 预先下载 Playwright wheel 与浏览器驱动离线安装；
-   > - 配置具备公网访问权限的代理，并在 `pip` 命令中加入 `--proxy` 参数；
-   > - 使用 `pip install --index-url <镜像地址> playwright` 指定可信镜像源。
-   >
-   > 成功安装 Python 包后，再执行 `playwright install` 下载浏览器内核。
+### 2. 留言公开采集工具 ([comments_scraper/](comments_scraper/))
 
-2. 运行采集脚本：
+采集国家税务总局留言公开页面的用户留言：
 
-   ```bash
-   python chinatax_scraper.py
-   ```
+- **留言列表**：提取留言问题、日期、链接
+- **详情下载**：自动下载问答详情内容
+- **去重管理**：MD5 去重，避免重复采集
+- **断点续传**：支持中断后继续采集
 
-   或者安装后使用命令行入口：
+📖 [查看详细文档](comments_scraper/README.md)
 
-   ```bash
-   chinatax-scraper
-   ```
+## 快速开始
 
-3. 可选参数：
+### 安装依赖
 
-   - `--csv PATH`：指定保存 CSV 的路径（默认 `chinatax_flfg.csv`）。
-   - `--headed`：以有界面模式运行浏览器，便于调试。
+```bash
+pip install .
+playwright install
+```
 
-运行结束后，终端会输出新增记录数及保存位置。
+### 使用示例
+
+#### 法规库采集
+
+```bash
+# 1. 采集列表数据
+cd flfg_scraper
+python chinatax_scraper.py
+
+# 2. 批量下载文档
+python chinatax_scheduler.py --not-downloaded --output-dir ./documents
+```
+
+#### 留言公开采集
+
+```bash
+# 一步完成：采集列表并下载详情
+cd comments_scraper
+python chinatax_comments_scraper.py --auto-download
+```
 
 ## 注意事项
 
-- 初次使用 Playwright 需执行 `playwright install` 安装浏览器内核。
-- 建议为请求配置合适的代理或网络环境，确保可以访问目标网站。
+- 初次使用需要运行 `playwright install` 安装浏览器驱动
+- 建议配置合适的网络环境以访问目标网站
+- 生成的 CSV 文件使用 UTF-8-BOM 编码，可在 Excel 中正常打开
+- 所有工具都支持断点续传，中断后可以继续运行
+
+## 开发文档
+
+- [项目指南 (CLAUDE.md)](CLAUDE.md) - 针对 Claude Code 的开发指南
+- [快速入门 (QUICKSTART.md)](QUICKSTART.md) - 快速上手指南
+- [Excel 兼容性 (EXCEL_COMPATIBILITY.md)](EXCEL_COMPATIBILITY.md) - CSV 编码说明
+
+## 许可证
+
+MIT License

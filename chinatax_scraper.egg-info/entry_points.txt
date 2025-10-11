@@ -1,0 +1,2 @@
+[console_scripts]
+chinatax-scraper = chinatax_scraper:main
