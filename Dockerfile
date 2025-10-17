@@ -4,37 +4,18 @@ FROM python:3.11-slim AS base
 # 设置工作目录
 WORKDIR /app
 
-# 安装系统依赖（Playwright需要的浏览器依赖）
+# 安装基础系统依赖
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
     ca-certificates \
-    fonts-liberation \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libatk1.0-0 \
-    libatspi2.0-0 \
-    libcups2 \
-    libdbus-1-3 \
-    libdrm2 \
-    libgbm1 \
-    libgtk-3-0 \
-    libnspr4 \
-    libnss3 \
-    libwayland-client0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxkbcommon0 \
-    libxrandr2 \
-    xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Stage 2: 依赖安装
 FROM base AS dependencies
 
-# 复制项目配置文件
-COPY pyproject.toml ./
+# 复制应用代码（需要在安装前复制，因为 pyproject.toml 依赖这些目录）
+COPY . .
 
 # 安装Python依赖
 RUN pip install --no-cache-dir --upgrade pip && \
@@ -46,9 +27,6 @@ RUN playwright install chromium && \
 
 # Stage 3: 最终镜像
 FROM dependencies AS final
-
-# 复制应用代码
-COPY . .
 
 # 创建必要的目录
 RUN mkdir -p csv_exports flfg_downloads logs
