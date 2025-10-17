@@ -1,0 +1,143 @@
+version: '3.8'
+
+services:
+  # 主应用服务（使用SQLite）
+  chinatax-scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chinatax-scraper
+    ports:
+      - "8000:8000"
+    volumes:
+      # 持久化数据库文件
+      - ./data:/app/data
+      # 持久化CSV导出文件
+      - ./csv_exports:/app/csv_exports
+      # 持久化下载的法律法规文档
+      - ./flfg_downloads:/app/flfg_downloads
+      # 持久化日志文件
+      - ./logs:/app/logs
+    environment:
+      - DB_TYPE=sqlite
+      - SQLITE_DB_PATH=/app/data/chinatax.db
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    networks:
+      - chinatax-network
+
+  # 使用PostgreSQL的配置（可选）
+  # chinatax-scraper-postgres:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: chinatax-scraper-postgres
+  #   ports:
+  #     - "8001:8000"
+  #   volumes:
+  #     - ./csv_exports:/app/csv_exports
+  #     - ./flfg_downloads:/app/flfg_downloads
+  #     - ./logs:/app/logs
+  #   environment:
+  #     - DB_TYPE=mysql
+  #     - MYSQL_HOST=postgres
+  #     - MYSQL_PORT=5432
+  #     - MYSQL_USER=chinatax
+  #     - MYSQL_PASSWORD=chinatax_password
+  #     - MYSQL_DATABASE=chinatax
+  #     - PYTHONUNBUFFERED=1
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+  #   networks:
+  #     - chinatax-network
+  #   profiles:
+  #     - postgres  # 需要手动启用：docker-compose --profile postgres up
+
+  # PostgreSQL数据库（可选）
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: chinatax-postgres
+  #   environment:
+  #     - POSTGRES_DB=chinatax
+  #     - POSTGRES_USER=chinatax
+  #     - POSTGRES_PASSWORD=chinatax_password
+  #     - POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U chinatax"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   restart: unless-stopped
+  #   networks:
+  #     - chinatax-network
+  #   profiles:
+  #     - postgres
+
+  # MySQL数据库（可选）
+  # mysql:
+  #   image: mysql:8.0
+  #   container_name: chinatax-mysql
+  #   environment:
+  #     - MYSQL_ROOT_PASSWORD=root_password
+  #     - MYSQL_DATABASE=chinatax
+  #     - MYSQL_USER=chinatax
+  #     - MYSQL_PASSWORD=chinatax_password
+  #     - MYSQL_CHARACTER_SET_SERVER=utf8mb4
+  #     - MYSQL_COLLATION_SERVER=utf8mb4_unicode_ci
+  #   volumes:
+  #     - mysql-data:/var/lib/mysql
+  #   ports:
+  #     - "3306:3306"
+  #   healthcheck:
+  #     test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot_password"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   restart: unless-stopped
+  #   networks:
+  #     - chinatax-network
+  #   profiles:
+  #     - mysql
+
+  # # 使用MySQL的应用配置（可选）
+  # chinatax-scraper-mysql:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: chinatax-scraper-mysql
+  #   ports:
+  #     - "8002:8000"
+  #   volumes:
+  #     - ./csv_exports:/app/csv_exports
+  #     - ./flfg_downloads:/app/flfg_downloads
+  #     - ./logs:/app/logs
+  #   environment:
+  #     - DB_TYPE=mysql
+  #     - MYSQL_HOST=mysql
+  #     - MYSQL_PORT=3306
+  #     - MYSQL_USER=chinatax
+  #     - MYSQL_PASSWORD=chinatax_password
+  #     - MYSQL_DATABASE=chinatax
+  #     - PYTHONUNBUFFERED=1
+  #   depends_on:
+  #     mysql:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+  #   networks:
+  #     - chinatax-network
+  #   profiles:
+  #     - mysql  # 需要手动启用：docker-compose --profile mysql up
+
+networks:
+  chinatax-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  mysql-data:

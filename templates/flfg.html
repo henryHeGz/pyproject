@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>法律法规 - 正鹏AI数据获取平台</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 导航栏 -->
+        <nav class="navbar">
+            <div class="nav-brand">
+                <h1>🚀 正鹏AI数据获取平台</h1>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="/">首页</a></li>
+                <li><a href="/flfg" class="active">法律法规</a></li>
+                <li><a href="/comments">留言公开</a></li>
+                <li><a href="/tasks">任务管理</a></li>
+            </ul>
+        </nav>
+
+        <!-- 法律法规页面内容 -->
+        <div class="main-content">
+            <div class="header">
+                <h2>📚 法律法规爬虫</h2>
+                <p class="subtitle">抓取和管理税务法律法规数据</p>
+            </div>
+
+            <div class="grid">
+                <!-- 爬取法律法规 -->
+                <div class="card full-width">
+                    <h3>爬取法律法规列表</h3>
+                    <form id="flfgForm">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                            <div class="form-group">
+                                <label>起始页码</label>
+                                <input type="number" name="start_page" value="1" min="1" required>
+                            </div>
+                            <div class="form-group">
+                                <label>抓取页数（空=全部）</label>
+                                <input type="number" name="page_count" min="1" placeholder="留空表示抓取全部">
+                            </div>
+                            <div class="form-group checkbox-group" style="display: flex; align-items: flex-end;">
+                                <input type="checkbox" name="headless" id="flfg-headless" checked>
+                                <label for="flfg-headless" style="margin: 0;">无头模式（后台运行）</label>
+                            </div>
+                        </div>
+                        <button type="submit" class="button" style="margin-top: 15px;">开始爬取</button>
+                    </form>
+                </div>
+
+                <!-- 下载法律法规详情 -->
+                <div class="card" style="display: none;">
+                    <h3>下载法律法规详情</h3>
+                    <form id="flfgDownloadForm">
+                        <div class="form-group">
+                            <label>输出目录</label>
+                            <input type="text" name="output_dir" value="./flfg_downloads" required>
+                        </div>
+                        <div class="form-group">
+                            <label>最多下载数量（空=全部）</label>
+                            <input type="number" name="max_downloads" min="1" placeholder="留空表示下载全部未下载的">
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" name="headless" id="flfg-download-headless" checked>
+                            <label for="flfg-download-headless" style="margin: 0;">无头模式</label>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" name="only_not_downloaded" id="only-not-downloaded" checked>
+                            <label for="only-not-downloaded" style="margin: 0;">只下载未下载的</label>
+                        </div>
+                        <button type="submit" class="button tertiary">开始下载</button>
+                    </form>
+                </div>
+
+                <!-- 数据库预览 -->
+                <div class="card full-width">
+                    <h3>数据库预览</h3>
+                    <div class="stat-row">
+                        <div class="stat-item">
+                            总记录数: <strong id="flfg-total">-</strong>
+                        </div>
+                        <div class="stat-item">
+                            已下载: <strong id="flfg-downloaded">-</strong>
+                        </div>
+                        <div class="stat-item">
+                            未下载: <strong id="flfg-not-downloaded">-</strong>
+                        </div>
+                        <div style="margin-left: auto; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                            <label style="font-weight: 500;">筛选:</label>
+                            <select id="downloadFilter" class="filter-select" onchange="applyFilter()">
+                                <option value="all">全部</option>
+                                <option value="Y">已下载</option>
+                                <option value="N">未下载</option>
+                            </select>
+                            <button class="button secondary small" onclick="refreshPreview()">刷新预览</button>
+                            <div style="border-left: 2px solid #ddd; height: 24px;"></div>
+                            <button class="button tertiary small" onclick="showBulkDownloadDialog()">批量下载未下载</button>
+                            <button class="button tertiary small" onclick="showBatchDownloadDialog()" id="batchDownloadBtn" disabled>批量下载选中 (<span id="selectedCount">0</span>)</button>
+                            <div style="border-left: 2px solid #ddd; height: 24px;"></div>
+                            <button class="button secondary small" onclick="exportAllZip()">📦 导出全部资料</button>
+                            <button class="button secondary small" onclick="exportSelectedZip()" id="exportSelectedBtn" disabled>📦 导出选中资料 (<span id="selectedCountExport">0</span>)</button>
+                        </div>
+                    </div>
+                    <div id="previewTable" class="table-container">
+                        <div class="loading">
+                            <div class="spinner"></div> 加载中...
+                        </div>
+                    </div>
+                    <div id="pagination" class="pagination" style="display: none;">
+                        <div class="pagination-controls">
+                            <button onclick="changePage('first')" id="firstBtn">首页</button>
+                            <button onclick="changePage('prev')" id="prevBtn">上一页</button>
+                            <span class="pagination-info">
+                                第 <span id="currentPage">1</span> / <span id="totalPages">1</span> 页
+                            </span>
+                            <button onclick="changePage('next')" id="nextBtn">下一页</button>
+                            <button onclick="changePage('last')" id="lastBtn">末页</button>
+                        </div>
+                        <div class="pagination-meta">
+                            <span class="pagination-total">共 <span id="totalRecords">0</span> 条</span>
+                            <select class="page-size-select" id="pageSizeSelect" onchange="changePageSize()">
+                                <option value="10" selected>10条/页</option>
+                                <option value="20">20条/页</option>
+                                <option value="50">50条/页</option>
+                                <option value="100">100条/页</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 最近任务 -->
+                <div class="card full-width">
+                    <h3>最近任务</h3>
+                    <div id="recentTasks" class="task-list">
+                        <div class="loading">
+                            <div class="spinner"></div> 加载中...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 批量下载未下载记录弹窗 -->
+    <div id="bulkDownloadModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h3>批量下载未下载记录</h3>
+            <p style="margin: 15px 0;">当前有 <strong id="notDownloadedCount">-</strong> 条未下载的记录</p>
+            <div class="form-group">
+                <label>最多下载数量（留空下载全部）</label>
+                <input type="number" id="bulkMaxDownloads" min="1" placeholder="留空表示下载全部">
+            </div>
+            <div class="form-group checkbox-group">
+                <input type="checkbox" id="bulkHeadless" checked>
+                <label for="bulkHeadless" style="margin: 0;">无头模式（后台运行）</label>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                <button class="button secondary" onclick="closeBulkDownloadDialog()">取消</button>
+                <button class="button tertiary" onclick="confirmBulkDownload()">开始下载</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 批量下载选中记录弹窗 -->
+    <div id="batchDownloadModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h3>批量下载选中记录</h3>
+            <p style="margin: 15px 0;">已选中 <strong id="batchSelectedCount">0</strong> 条记录</p>
+            <div class="form-group checkbox-group">
+                <input type="checkbox" id="batchHeadless" checked>
+                <label for="batchHeadless" style="margin: 0;">无头模式（后台运行）</label>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                <button class="button secondary" onclick="closeBatchDownloadDialog()">取消</button>
+                <button class="button tertiary" onclick="confirmBatchDownload()">开始下载</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 分页状态
+        let currentPage = 1;
+        let pageSize = 10;
+        let totalPages = 1;
+        let currentFilter = 'all';  // 当前筛选状态
+
+        // 选中的记录ID集合
+        let selectedRecords = new Set();
+
+        // 提交爬取任务
+        document.getElementById('flfgForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const data = {
+                start_page: parseInt(formData.get('start_page')),
+                page_count: formData.get('page_count') ? parseInt(formData.get('page_count')) : null,
+                headless: formData.get('headless') === 'on'
+            };
+            await submitTask('/api/flfg/scrape', data, '法律法规爬取任务');
+        });
+
+        // 提交下载任务
+        document.getElementById('flfgDownloadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const data = {
+                output_dir: formData.get('output_dir'),
+                max_downloads: formData.get('max_downloads') ? parseInt(formData.get('max_downloads')) : null,
+                headless: formData.get('headless') === 'on',
+                only_not_downloaded: formData.get('only_not_downloaded') === 'on'
+            };
+            await submitTask('/api/flfg/download', data, '法律法规下载任务');
+        });
+
+        // 单个下载
+        async function downloadSingleRecord(recordId, title) {
+            if (!confirm(`确定要下载这条记录吗？\n\n${title}`)) {
+                return;
+            }
+
+            const data = {
+                record_ids: [recordId],
+                output_dir: "./flfg_downloads",
+                headless: true
+            };
+            await submitTask('/api/flfg/download-batch', data, '单条记录下载任务');
+        }
+
+        // 显示批量下载未下载记录弹窗
+        async function showBulkDownloadDialog() {
+            // 获取统计数据
+            const response = await fetch('/api/database/stats');
+            const data = await response.json();
+            const flfgTable = data.tables.find(t => t.name === 'flfg_records');
+            const notDownloadedCount = flfgTable ? flfgTable.not_downloaded : 0;
+
+            if (notDownloadedCount === 0) {
+                alert('没有未下载的记录！');
+                return;
+            }
+
+            document.getElementById('notDownloadedCount').textContent = notDownloadedCount;
+            document.getElementById('bulkDownloadModal').style.display = 'flex';
+        }
+
+        function closeBulkDownloadDialog() {
+            document.getElementById('bulkDownloadModal').style.display = 'none';
+            document.getElementById('bulkMaxDownloads').value = '';
+        }
+
+        async function confirmBulkDownload() {
+            const maxDownloads = document.getElementById('bulkMaxDownloads').value;
+            const headless = document.getElementById('bulkHeadless').checked;
+
+            const data = {
+                output_dir: "./flfg_downloads",
+                max_downloads: maxDownloads ? parseInt(maxDownloads) : null,
+                headless: headless,
+                only_not_downloaded: true
+            };
+
+            closeBulkDownloadDialog();
+            await submitTask('/api/flfg/download', data, '批量下载未下载记录');
+        }
+
+        // 显示批量下载选中记录弹窗
+        function showBatchDownloadDialog() {
+            if (selectedRecords.size === 0) {
+                alert('请先勾选要下载的记录！');
+                return;
+            }
+
+            document.getElementById('batchSelectedCount').textContent = selectedRecords.size;
+            document.getElementById('batchDownloadModal').style.display = 'flex';
+        }
+
+        function closeBatchDownloadDialog() {
+            document.getElementById('batchDownloadModal').style.display = 'none';
+        }
+
+        async function confirmBatchDownload() {
+            const headless = document.getElementById('batchHeadless').checked;
+
+            const data = {
+                record_ids: Array.from(selectedRecords),
+                output_dir: "./flfg_downloads",
+                headless: headless
+            };
+
+            closeBatchDownloadDialog();
+            await submitTask('/api/flfg/download-batch', data, '批量下载选中记录');
+        }
+
+        // 批量下载选中记录
+        async function downloadSelectedRecords() {
+            if (selectedRecords.size === 0) {
+                alert('请先勾选要下载的记录！');
+                return;
+            }
+
+            if (!confirm(`确定要下载选中的 ${selectedRecords.size} 条记录吗？`)) {
+                return;
+            }
+
+            const data = {
+                record_ids: Array.from(selectedRecords),
+                output_dir: "./flfg_downloads",
+                headless: true
+            };
+            await submitTask('/api/flfg/download-batch', data, '批量下载任务');
+        }
+
+        // 切换记录选中状态
+        function toggleRecordSelection(recordId, checkbox) {
+            if (checkbox.checked) {
+                selectedRecords.add(recordId);
+            } else {
+                selectedRecords.delete(recordId);
+            }
+            updateSelectedCount();
+        }
+
+        // 更新选中数量显示
+        function updateSelectedCount() {
+            const count = selectedRecords.size;
+            document.querySelectorAll('#selectedCount, #selectedCountExport').forEach(el => el.textContent = count);
+
+            // 更新按钮状态
+            const batchBtn = document.getElementById('batchDownloadBtn');
+            if (batchBtn) {
+                batchBtn.disabled = count === 0;
+            }
+
+            const exportBtn = document.getElementById('exportSelectedBtn');
+            if (exportBtn) {
+                exportBtn.disabled = count === 0;
+            }
+        }
+
+        // 清空选择
+        function clearSelection() {
+            selectedRecords.clear();
+            updateSelectedCount();
+            // 取消所有复选框的选中状态
+            document.querySelectorAll('.record-checkbox').forEach(cb => cb.checked = false);
+            const selectAll = document.getElementById('selectAll');
+            if (selectAll) selectAll.checked = false;
+        }
+
+        // 全选/取消全选
+        function toggleSelectAll(checkbox) {
+            const checkboxes = document.querySelectorAll('.record-checkbox');
+            checkboxes.forEach(cb => {
+                cb.checked = checkbox.checked;
+                const recordId = cb.onchange.toString().match(/'([^']+)'/)[1];
+                if (checkbox.checked) {
+                    selectedRecords.add(recordId);
+                } else {
+                    selectedRecords.delete(recordId);
+                }
+            });
+            updateSelectedCount();
+        }
+
+        async function submitTask(url, data, taskName) {
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+                alert(`${taskName}已提交！\n任务ID: ${result.task_id}\n\n您可以在"任务管理"页面查看执行进度`);
+                loadRecentTasks();
+            } catch (error) {
+                alert('任务提交失败: ' + error.message);
+            }
+        }
+
+        // 加载数据库统计
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/database/stats');
+                const data = await response.json();
+                const flfgTable = data.tables.find(t => t.name === 'flfg_records');
+
+                if (flfgTable) {
+                    document.getElementById('flfg-total').textContent = flfgTable.total_rows.toLocaleString();
+                    document.getElementById('flfg-downloaded').textContent = flfgTable.downloaded.toLocaleString();
+                    document.getElementById('flfg-not-downloaded').textContent = flfgTable.not_downloaded.toLocaleString();
+                }
+            } catch (error) {
+                console.error('加载统计失败:', error);
+            }
+        }
+
+        // 加载预览数据
+        async function loadPreview(page = currentPage, size = pageSize, filter = currentFilter) {
+            try {
+                // 构建URL参数
+                let url = `/api/records/flfg/preview?page=${page}&page_size=${size}`;
+                if (filter !== 'all') {
+                    url += `&downloaded_filter=${filter}`;
+                }
+
+                const response = await fetch(url);
+                const data = await response.json();
+
+                // 更新分页状态
+                currentPage = data.page;
+                pageSize = data.page_size;
+                totalPages = data.total_pages;
+                currentFilter = filter;
+
+                const previewTable = document.getElementById('previewTable');
+                const pagination = document.getElementById('pagination');
+
+                if (data.count === 0) {
+                    previewTable.innerHTML = '<div class="empty">暂无记录</div>';
+                    pagination.style.display = 'none';
+                    return;
+                }
+
+                // 显示分页控件
+                pagination.style.display = 'flex';
+                document.getElementById('currentPage').textContent = currentPage;
+                document.getElementById('totalPages').textContent = totalPages;
+                document.getElementById('totalRecords').textContent = data.total.toLocaleString();
+
+                // 更新按钮状态
+                document.getElementById('firstBtn').disabled = currentPage === 1;
+                document.getElementById('prevBtn').disabled = currentPage === 1;
+                document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+                document.getElementById('lastBtn').disabled = currentPage >= totalPages;
+
+                // 渲染表格
+                let tableHtml = '<table class="data-table"><thead><tr>';
+                tableHtml += '<th style="width: 40px;"><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)"></th>';
+                const headers = Object.keys(data.records[0]);
+                headers.forEach(h => {
+                    tableHtml += `<th>${h}</th>`;
+                });
+                tableHtml += '<th style="width: 160px;">操作</th>';
+                tableHtml += '</tr></thead><tbody>';
+
+                data.records.forEach(record => {
+                    const recordId = record['序号'];
+                    const isChecked = selectedRecords.has(recordId) ? 'checked' : '';
+                    const isDownloaded = record['是否下载'] === 'Y';
+                    tableHtml += '<tr>';
+                    tableHtml += `<td><input type="checkbox" class="record-checkbox" ${isChecked} onchange="toggleRecordSelection('${recordId}', this)"></td>`;
+                    headers.forEach(h => {
+                        let value = record[h];
+                        if (h === '链接' && value) {
+                            value = `<a href="${value}" target="_blank" class="link">查看</a>`;
+                        } else if (h === '是否下载') {
+                            value = value === 'Y' ? '✅' : '⏳';
+                        }
+                        tableHtml += `<td>${value || '-'}</td>`;
+                    });
+                    // 操作按钮：下载 + 导出
+                    tableHtml += `<td>`;
+                    tableHtml += `<button class="button small" onclick="downloadSingleRecord('${recordId}', '${record['标题'].replace(/'/g, "\\'")}')">下载</button> `;
+                    if (isDownloaded) {
+                        tableHtml += `<button class="button small secondary" onclick="exportSingleZip('${recordId}')">📦</button>`;
+                    }
+                    tableHtml += `</td>`;
+                    tableHtml += '</tr>';
+                });
+
+                tableHtml += '</tbody></table>';
+                previewTable.innerHTML = tableHtml;
+            } catch (error) {
+                document.getElementById('previewTable').innerHTML =
+                    '<div class="empty">加载预览失败</div>';
+            }
+        }
+
+        // 应用筛选
+        function applyFilter() {
+            const filterSelect = document.getElementById('downloadFilter');
+            currentFilter = filterSelect.value;
+            loadPreview(1, pageSize, currentFilter);  // 筛选后重置到第一页
+        }
+
+        // 翻页控制
+        function changePage(action) {
+            let newPage = currentPage;
+
+            switch(action) {
+                case 'first':
+                    newPage = 1;
+                    break;
+                case 'prev':
+                    newPage = Math.max(1, currentPage - 1);
+                    break;
+                case 'next':
+                    newPage = Math.min(totalPages, currentPage + 1);
+                    break;
+                case 'last':
+                    newPage = totalPages;
+                    break;
+            }
+
+            if (newPage !== currentPage) {
+                loadPreview(newPage, pageSize, currentFilter);  // 保持筛选状态
+            }
+        }
+
+        // 改变每页显示数量
+        function changePageSize() {
+            const select = document.getElementById('pageSizeSelect');
+            pageSize = parseInt(select.value);
+            loadPreview(1, pageSize, currentFilter);  // 重置到第一页，保持筛选状态
+        }
+
+        // 加载最近任务
+        async function loadRecentTasks() {
+            try {
+                const response = await fetch('/api/tasks?category=法律法规&limit=10');
+                const data = await response.json();
+                const tasks = data.tasks;
+
+                const taskList = document.getElementById('recentTasks');
+                if (tasks.length === 0) {
+                    taskList.innerHTML = '<div class="empty">暂无最近任务</div>';
+                    return;
+                }
+
+                taskList.innerHTML = tasks.map(task => `
+                    <div class="task-item ${task.status}">
+                        <div class="task-header">
+                            <span class="task-type">${task.type}</span>
+                            <span class="task-status ${task.status}">
+                                ${task.status === 'running' ? '🔄 运行中' :
+                                  task.status === 'completed' ? '✅ 完成' :
+                                  '❌ 失败'}
+                            </span>
+                        </div>
+                        <div class="task-message">${task.message}</div>
+                        <div class="task-time">
+                            ${new Date(task.start_time).toLocaleString('zh-CN')}
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                document.getElementById('recentTasks').innerHTML =
+                    '<div class="empty">加载最近任务失败</div>';
+            }
+        }
+
+        function refreshPreview() {
+            loadStats();
+            loadPreview();
+        }
+
+        // 导出单条记录的资料为ZIP
+        async function exportSingleZip(recordId) {
+            try {
+                const response = await fetch(`/api/flfg/export-single-zip/${recordId}`);
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    alert(`导出失败: ${error.detail}`);
+                    return;
+                }
+
+                // 触发下载
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = response.headers.get('content-disposition')?.split('filename=')[1] || 'flfg_单条.zip';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+
+                alert('资料导出成功！');
+            } catch (error) {
+                alert('导出失败: ' + error.message);
+            }
+        }
+
+        // 导出选中记录的资料为ZIP
+        async function exportSelectedZip() {
+            if (selectedRecords.size === 0) {
+                alert('请先勾选要导出的记录！');
+                return;
+            }
+
+            if (!confirm(`确定要导出选中的 ${selectedRecords.size} 条记录的资料吗？\n注意：只会导出已下载的记录。`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/flfg/export-selected-zip', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        record_ids: Array.from(selectedRecords)
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    alert(`导出失败: ${error.detail}`);
+                    return;
+                }
+
+                // 触发下载
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+
+                // 从响应头获取文件名
+                const contentDisposition = response.headers.get('content-disposition');
+                let filename = 'flfg_选中.zip';
+                if (contentDisposition) {
+                    const matches = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                    if (matches && matches[1]) {
+                        filename = matches[1].replace(/['"]/g, '');
+                    }
+                } else {
+                    // 从自定义头获取
+                    const summary = response.headers.get('X-Export-Summary');
+                    if (summary) {
+                        const match = summary.match(/成功导出 (\d+) 条/);
+                        if (match) {
+                            filename = `flfg_选中_${match[1]}条.zip`;
+                        }
+                    }
+                }
+
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+
+                const summary = response.headers.get('X-Export-Summary');
+                alert(summary ? `导出完成！\n${summary}` : '资料导出成功！');
+            } catch (error) {
+                alert('导出失败: ' + error.message);
+            }
+        }
+
+        // 导出全部已下载记录的资料为ZIP
+        async function exportAllZip() {
+            if (!confirm('确定要导出所有已下载记录的资料吗？\n如果记录数量较多，可能需要一些时间。')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/flfg/export-all-zip');
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    alert(`导出失败: ${error.detail}`);
+                    return;
+                }
+
+                // 触发下载
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+
+                // 从响应头获取文件名
+                const summary = response.headers.get('X-Export-Summary');
+                let filename = 'flfg_全部.zip';
+                if (summary) {
+                    const match = summary.match(/成功导出 (\d+) 条/);
+                    if (match) {
+                        filename = `flfg_全部_${match[1]}条.zip`;
+                    }
+                }
+
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+
+                alert(summary ? `导出完成！\n${summary}` : '资料导出成功！');
+            } catch (error) {
+                alert('导出失败: ' + error.message);
+            }
+        }
+
+        // 初始加载
+        loadStats();
+        loadPreview();
+        loadRecentTasks();
+
+        // 定期刷新
+        setInterval(loadStats, 30000);  // 每30秒刷新统计
+        setInterval(loadRecentTasks, 10000);  // 每10秒刷新任务
+    </script>
+</body>
+</html>

@@ -1,0 +1,80 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Database files - stored in data/ directory
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# CSV exports - all generated CSV files go here
+csv_exports/
+
+# Task logs - all task execution logs go here
+task_logs/
+
+# Downloaded files
+flfg_downloads/
+
+# Legacy CSV files in root (cleanup recommended)
+*.csv
+
+# Authentication and secrets
+*.json
+!pyproject.json
+auth_state.json
+credentials.json
+
+# Logs
+*.log
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Playwright
+playwright-report/
+test-results/
+
+# Docker
+.env
+.env.local
+data/
+logs/
+backups/

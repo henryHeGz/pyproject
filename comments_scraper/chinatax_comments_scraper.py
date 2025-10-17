@@ -8,13 +8,18 @@
 """
 
 import asyncio
-import csv
 import hashlib
 import re
-from dataclasses import dataclass, replace
+import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Set, List, Dict
 import argparse
+
+# 添加父目录到 Python 路径以导入 db_config
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from config.db_config import get_db_cursor
 
 try:
     from playwright.async_api import async_playwright, Page, Browser
@@ -59,59 +64,76 @@ class CommentRecord:
         return [self.id, self.question, self.date, self.link, self.downloaded,
                 self.question_content, self.answer_content]
 
+    def to_dict(self) -> dict:
+        """转换为字典格式，用于数据库插入"""
+        return {
+            "id": self.id,
+            "question": self.question,
+            "date": self.date,
+            "link": self.link,
+            "downloaded": self.downloaded,
+            "question_content": self.question_content,
+            "answer_content": self.answer_content,
+        }
 
-def load_existing_ids(csv_path: Path) -> Set[str]:
-    """加载已存在的记录ID集合，用于去重"""
-    if not csv_path.exists():
-        return set()
 
+def load_existing_ids() -> Set[str]:
+    """从数据库加载已存在的记录ID集合，用于去重"""
     existing_ids = set()
-    with open(csv_path, 'r', encoding='utf-8', newline='') as f:
-        reader = csv.reader(f)
-        next(reader, None)  # 跳过表头
-        for row in reader:
-            if row and len(row) > 0:
-                existing_ids.add(row[0])  # ID在第一列
-
+    try:
+        with get_db_cursor() as cursor:
+            cursor.execute("SELECT id FROM comment_records")
+            for row in cursor.fetchall():
+                existing_ids.add(row["id"])
+    except Exception as e:
+        print(f"⚠️  加载现有数据时出错: {e}")
     return existing_ids
 
 
-def load_existing_records(csv_path: Path) -> Dict[str, CommentRecord]:
-    """加载已存在的所有记录，用于下载内容更新"""
-    if not csv_path.exists():
-        return {}
-
+def load_existing_records() -> Dict[str, CommentRecord]:
+    """从数据库加载已存在的所有记录，用于下载内容更新"""
     records = {}
-    with open(csv_path, 'r', encoding='utf-8', newline='') as f:
-        reader = csv.reader(f)
-        next(reader, None)  # 跳过表头
-        for row in reader:
-            if row and len(row) >= 5:
-                # 兼容旧格式（5列）和新格式（7列）
-                record_id = row[0]
-                question = row[1]
-                date = row[2]
-                link = row[3]
-                downloaded = row[4] if len(row) > 4 else "N"
-                question_content = row[5] if len(row) > 5 else ""
-                answer_content = row[6] if len(row) > 6 else ""
-
+    try:
+        with get_db_cursor() as cursor:
+            cursor.execute("""
+                SELECT id, question, date, link, downloaded,
+                       question_content, answer_content
+                FROM comment_records
+            """)
+            for row in cursor.fetchall():
                 record = CommentRecord.from_data(
-                    question, date, link, downloaded,
-                    question_content, answer_content
+                    row["question"], row["date"], row["link"], row["downloaded"],
+                    row["question_content"] or "", row["answer_content"] or ""
                 )
-                records[record_id] = record
-
+                records[row["id"]] = record
+    except Exception as e:
+        print(f"⚠️  加载现有记录时出错: {e}")
     return records
 
 
-def save_all_records(csv_path: Path, records: List[CommentRecord]):
-    """保存所有记录到CSV文件（完全重写）"""
-    with open(csv_path, 'w', encoding='utf-8-sig', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(['id', '留言问题', '日期', '链接地址', '是否下载', '问', '答'])
-        for record in records:
-            writer.writerow(record.to_csv_row())
+def save_all_records(records: List[CommentRecord]):
+    """保存所有记录到数据库（批量插入或更新）"""
+    if not records:
+        return
+
+    try:
+        with get_db_cursor() as cursor:
+            for record in records:
+                # 使用 INSERT OR REPLACE (SQLite) / INSERT ... ON DUPLICATE KEY UPDATE (MySQL)
+                # SQLite 兼容写法：先尝试更新，如果不存在则插入
+                cursor.execute("""
+                    INSERT INTO comment_records
+                    (id, question, date, link, downloaded, question_content, answer_content)
+                    VALUES (%(id)s, %(question)s, %(date)s, %(link)s, %(downloaded)s,
+                            %(question_content)s, %(answer_content)s)
+                    ON CONFLICT(id) DO UPDATE SET
+                        downloaded = excluded.downloaded,
+                        question_content = excluded.question_content,
+                        answer_content = excluded.answer_content,
+                        updated_at = CURRENT_TIMESTAMP
+                """, record.to_dict())
+    except Exception as e:
+        print(f"❌ 保存记录时出错: {e}")
 
 
 
@@ -358,30 +380,28 @@ async def goto_next_page(page: Page) -> bool:
         return False
 
 
-async def scrape(csv_path: Path, headless: bool = True, start_page: int = 1, max_pages: int = None, auto_download: bool = False) -> int:
+async def scrape(headless: bool = True, start_page: int = 1, max_pages: int = None, auto_download: bool = False,
+                 csv_path: str = None, overwrite_db: bool = False) -> tuple[int, str, List[CommentRecord]]:
     """
     主爬取函数
 
     参数：
-        csv_path: CSV文件路径
         headless: 是否无头模式运行
         start_page: 起始页码（默认：1）
         max_pages: 最多爬取页数（默认：None，表示爬取所有页）
         auto_download: 爬取完成后自动下载详情内容（默认：False）
+        csv_path: CSV文件保存路径（默认：None，不保存CSV）
+        overwrite_db: 是否覆盖数据库已存在的记录（默认：False）
 
     返回：
-        int: 新增的记录数量
+        tuple[int, str, List[CommentRecord]]: (新增记录数, CSV文件路径, 本次抓取的所有记录)
     """
-    # 加载已存在的ID
-    existing_ids = load_existing_ids(csv_path)
-    print(f"📂 已加载 {len(existing_ids)} 条现有记录ID")
-
     if start_page > 1:
         print(f"📄 起始页码：第 {start_page} 页")
     if max_pages:
         print(f"📊 最多爬取：{max_pages} 页")
 
-    all_new_records = []
+    all_scraped_records = []  # 本次抓取的所有记录（不去重）
     page_num = 1
     pages_scraped = 0  # 已爬取页数计数器
 
@@ -425,19 +445,9 @@ async def scrape(csv_path: Path, headless: bool = True, start_page: int = 1, max
                 records = await extract_comments(page)
                 print(f"   提取到 {len(records)} 条留言")
 
-                # 过滤重复记录
-                new_records = [r for r in records if r.id not in existing_ids]
-                print(f"   其中 {len(new_records)} 条为新记录")
-
-                # 更新已存在ID集合
-                for record in new_records:
-                    existing_ids.add(record.id)
-                    all_new_records.append(record)
-
-                # 如果当前页没有新记录，可能已经全部采集完毕
-                if not new_records and records:
-                    print("   当前页全部为重复记录，可能已采集完毕")
-                    # 继续尝试下一页，以防中间有遗漏
+                # 直接添加所有记录到本次抓取列表（不去重）
+                all_scraped_records.extend(records)
+                print(f"   已添加到本次抓取列表")
 
                 # 增加已爬取页数计数
                 pages_scraped += 1
@@ -460,46 +470,102 @@ async def scrape(csv_path: Path, headless: bool = True, start_page: int = 1, max
         finally:
             await browser.close()
 
-    # 写入CSV
-    csv_exists = csv_path.exists()
+    print(f"\n📊 本次共抓取 {len(all_scraped_records)} 条记录")
 
-    if not csv_exists:
-        # 创建新文件并写入表头（使用UTF-8 BOM，以便Excel正确识别）
-        with open(csv_path, 'w', encoding='utf-8-sig', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(['id', '留言问题', '日期', '链接地址', '是否下载', '问', '答'])
-
-    if all_new_records:
-        # 追加新记录（追加模式使用utf-8，因为BOM已经在文件开头）
-        with open(csv_path, 'a', encoding='utf-8', newline='') as f:
-            writer = csv.writer(f)
-            for record in all_new_records:
-                writer.writerow(record.to_csv_row())
-
-        print(f"\n✅ 成功添加 {len(all_new_records)} 条新记录到 {csv_path}")
-    else:
-        print(f"\n📝 没有新记录需要添加")
-
-    new_count = len(all_new_records)
-
-    # 如果启用自动下载，立即下载新记录的详情内容
-    if auto_download and new_count > 0:
+    # 如果启用自动下载，立即下载本次抓取记录的详情内容
+    if auto_download and all_scraped_records:
         print(f"\n{'='*60}")
-        print("🚀 开始自动下载新记录的详情内容...")
+        print(f"🚀 自动下载功能已启用，开始下载本次抓取的 {len(all_scraped_records)} 条记录的详情内容...")
         print(f"{'='*60}\n")
 
-        downloaded = await download_contents(csv_path, headless, max_downloads=None)
+        downloaded = await download_new_records_content(headless, all_scraped_records)
         print(f"\n✅ 自动下载完成！成功下载 {downloaded} 条记录的详情内容")
 
-    return new_count
+    # 保存到CSV文件
+    actual_csv_path = None
+    if csv_path:
+        print(f"\n💾 正在保存到CSV文件: {csv_path}")
+        try:
+            import csv
+            from pathlib import Path
+
+            # 确保目录存在
+            csv_file = Path(csv_path)
+            csv_file.parent.mkdir(parents=True, exist_ok=True)
+
+            with open(csv_path, 'w', encoding='utf-8-sig', newline='') as f:
+                if all_scraped_records:
+                    writer = csv.writer(f)
+                    # 写入表头
+                    writer.writerow(['ID', '留言问题', '日期', '链接地址', '是否下载', '问的内容', '答的内容'])
+                    # 写入数据
+                    for record in all_scraped_records:
+                        writer.writerow(record.to_csv_row())
+            print(f"✅ 成功保存 {len(all_scraped_records)} 条记录到CSV文件")
+            actual_csv_path = csv_path
+        except Exception as e:
+            print(f"❌ 保存CSV文件时出错: {e}")
+
+    # 保存到数据库（根据overwrite_db参数决定是否覆盖）
+    new_count = 0
+    updated_count = 0
+    skipped_count = 0
+
+    if all_scraped_records:
+        print(f"\n💾 正在保存到数据库 (覆盖模式: {'是' if overwrite_db else '否'})...")
+
+        # 加载已存在的记录ID
+        existing_ids = load_existing_ids()
+        existing_count = len(existing_ids)
+
+        try:
+            with get_db_cursor() as cursor:
+                for record in all_scraped_records:
+                    if record.id in existing_ids:
+                        if overwrite_db:
+                            # 覆盖模式：更新已存在的记录
+                            cursor.execute("""
+                                UPDATE comment_records
+                                SET question = %(question)s, date = %(date)s, link = %(link)s,
+                                    downloaded = %(downloaded)s, question_content = %(question_content)s,
+                                    answer_content = %(answer_content)s, updated_at = CURRENT_TIMESTAMP
+                                WHERE id = %(id)s
+                            """, record.to_dict())
+                            updated_count += 1
+                        else:
+                            # 不覆盖模式：跳过已存在的记录
+                            skipped_count += 1
+                            # 只在详细模式下打印每条跳过的记录
+                            # print(f"   跳过已存在记录: {record.question}")
+                    else:
+                        # 插入新记录
+                        cursor.execute("""
+                            INSERT INTO comment_records
+                            (id, question, date, link, downloaded, question_content, answer_content)
+                            VALUES (%(id)s, %(question)s, %(date)s, %(link)s, %(downloaded)s,
+                                    %(question_content)s, %(answer_content)s)
+                        """, record.to_dict())
+                        new_count += 1
+
+            if overwrite_db:
+                print(f"✅ 数据库操作完成：新增 {new_count} 条，更新 {updated_count} 条")
+            else:
+                if skipped_count > 0:
+                    print(f"✅ 数据库操作完成：新增 {new_count} 条，跳过 {skipped_count} 条重复记录")
+                    print(f"   说明：本次抓取的 {len(all_scraped_records)} 条记录中，{skipped_count} 条已存在于数据库（共{existing_count}条记录）")
+                else:
+                    print(f"✅ 数据库操作完成：新增 {new_count} 条（数据库原有{existing_count}条记录）")
+        except Exception as e:
+            print(f"❌ 保存数据库时出错: {e}")
+
+    return new_count, actual_csv_path, all_scraped_records
 
 
-async def download_contents(csv_path: Path, headless: bool = True, max_downloads: int = None) -> int:
+async def download_contents(headless: bool = True, max_downloads: int = None) -> int:
     """
-    下载CSV中未下载记录的详情内容（问和答）
+    下载数据库中未下载记录的详情内容（问和答）
 
     参数：
-        csv_path: CSV文件路径
         headless: 是否无头模式运行
         max_downloads: 最多下载数量（默认：None，表示下载所有未下载的）
 
@@ -507,9 +573,9 @@ async def download_contents(csv_path: Path, headless: bool = True, max_downloads
         int: 成功下载的记录数量
     """
     # 加载所有现有记录
-    all_records = load_existing_records(csv_path)
+    all_records = load_existing_records()
     if not all_records:
-        print("📂 CSV文件为空或不存在")
+        print("📂 数据库为空或无记录")
         return 0
 
     # 筛选出未下载的记录
@@ -525,6 +591,39 @@ async def download_contents(csv_path: Path, headless: bool = True, max_downloads
         undownloaded = undownloaded[:max_downloads]
         print(f"📋 将下载前 {len(undownloaded)} 条记录")
 
+    return await _download_records_content(headless, undownloaded)
+
+
+async def download_new_records_content(headless: bool, records: List[CommentRecord]) -> int:
+    """
+    下载指定的新抓取记录的详情内容（问和答）
+
+    参数：
+        headless: 是否无头模式运行
+        records: 要下载的记录列表
+
+    返回：
+        int: 成功下载的记录数量
+    """
+    if not records:
+        print("📂 没有需要下载的记录")
+        return 0
+
+    print(f"📊 将下载 {len(records)} 条新记录的详情内容")
+    return await _download_records_content(headless, records)
+
+
+async def _download_records_content(headless: bool, records: List[CommentRecord]) -> int:
+    """
+    内部函数：下载指定记录列表的详情内容
+
+    参数：
+        headless: 是否无头模式运行
+        records: 要下载的记录列表
+
+    返回：
+        int: 成功下载的记录数量
+    """
     downloaded_count = 0
     updated_records = {}
 
@@ -540,8 +639,8 @@ async def download_contents(csv_path: Path, headless: bool = True, max_downloads
         page: Page = await context.new_page()
 
         try:
-            for i, record in enumerate(undownloaded, 1):
-                print(f"\n📥 [{i}/{len(undownloaded)}] 下载: {record.question}")
+            for i, record in enumerate(records, 1):
+                print(f"\n📥 [{i}/{len(records)}] 下载: {record.question}")
 
                 # 下载内容
                 question_content, answer_content = await download_comment_content(page, record.link)
@@ -564,17 +663,10 @@ async def download_contents(csv_path: Path, headless: bool = True, max_downloads
         finally:
             await browser.close()
 
-    # 如果有更新的记录，需要重写整个CSV
+    # 如果有更新的记录，需要更新数据库
     if updated_records:
-        print(f"\n💾 正在更新CSV文件...")
-
-        # 合并更新：将新下载的记录合并到所有记录中
-        for record_id, updated_record in updated_records.items():
-            all_records[record_id] = updated_record
-
-        # 重写CSV文件
-        save_all_records(csv_path, list(all_records.values()))
-
+        print(f"\n💾 正在更新数据库...")
+        save_all_records(list(updated_records.values()))
         print(f"✅ 成功更新 {downloaded_count} 条记录")
     else:
         print(f"\n📝 没有记录被更新")
@@ -601,8 +693,8 @@ def main():
   # 从第3页开始爬取5页（第3-7页）
   python chinatax_comments_scraper.py --start-page 3 --max-pages 5
 
-  # 指定输出文件并使用有头模式
-  python chinatax_comments_scraper.py --csv output.csv --headed
+  # 使用有头模式
+  python chinatax_comments_scraper.py --headed
 
   # 爬取列表并自动下载详情内容（一步完成）
   python chinatax_comments_scraper.py --auto-download
@@ -616,12 +708,6 @@ def main():
   # 下载前10条未下载的记录
   python chinatax_comments_scraper.py --download-content --max-downloads 10
         """
-    )
-    parser.add_argument(
-        '--csv',
-        type=Path,
-        default=Path('chinatax_comments.csv'),
-        help='CSV输出文件路径 (默认: chinatax_comments.csv)'
     )
     parser.add_argument(
         '--headed',
@@ -667,7 +753,6 @@ def main():
         print("🚀 开始下载留言详情内容...\n")
 
         downloaded = asyncio.run(download_contents(
-            args.csv,
             headless=not args.headed,
             max_downloads=args.max_downloads
         ))
@@ -694,15 +779,14 @@ def main():
     else:
         print("🚀 开始爬取国家税务总局留言数据...\n")
 
-    new_count = asyncio.run(scrape(
-        args.csv,
+    new_count, csv_path, records = asyncio.run(scrape(
         headless=not args.headed,
         start_page=args.start_page,
         max_pages=args.max_pages,
         auto_download=args.auto_download
     ))
 
-    print(f"\n🎉 爬取完成！新增 {new_count} 条记录")
+    print(f"\n🎉 爬取完成！新增 {new_count} 条记录，本次共抓取 {len(records)} 条记录")
 
 
 if __name__ == '__main__':

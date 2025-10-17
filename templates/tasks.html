@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>任务管理 - 正鹏AI数据获取平台</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 导航栏 -->
+        <nav class="navbar">
+            <div class="nav-brand">
+                <h1>🚀 正鹏AI数据获取平台</h1>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="/">首页</a></li>
+                <li><a href="/flfg">法律法规</a></li>
+                <li><a href="/comments">留言公开</a></li>
+                <li><a href="/tasks" class="active">任务管理</a></li>
+            </ul>
+        </nav>
+
+        <!-- 任务管理页面内容 -->
+        <div class="main-content">
+            <div class="header">
+                <h2>📊 任务管理</h2>
+                <p class="subtitle">查看和管理所有爬虫任务</p>
+            </div>
+
+            <!-- 运行中的任务 -->
+            <div class="card">
+                <h3>⚙️ 运行中的任务</h3>
+                <div id="runningTasks" class="task-list">
+                    <div class="loading">
+                        <div class="spinner"></div> 加载中...
+                    </div>
+                </div>
+            </div>
+
+            <!-- 已完成任务 -->
+            <div class="card">
+                <h3>✅ 已完成的任务</h3>
+                <div class="filter-row">
+                    <label>筛选分类:</label>
+                    <select id="categoryFilter" onchange="loadCompletedTasks()">
+                        <option value="">全部</option>
+                        <option value="法律法规">法律法规</option>
+                        <option value="留言公开">留言公开</option>
+                    </select>
+                    <label style="margin-left: 20px;">显示条数:</label>
+                    <select id="limitFilter" onchange="loadCompletedTasks()">
+                        <option value="10">10条</option>
+                        <option value="20">20条</option>
+                        <option value="50" selected>50条</option>
+                        <option value="100">100条</option>
+                    </select>
+                </div>
+                <div id="completedTasks" class="task-list">
+                    <div class="loading">
+                        <div class="spinner"></div> 加载中...
+                    </div>
+                </div>
+            </div>
+
+            <!-- CSV文件列表 -->
+            <div class="card">
+                <h3>📁 CSV文件列表</h3>
+                <div id="fileList" class="file-list">
+                    <div class="loading">
+                        <div class="spinner"></div> 加载中...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 日志查看弹窗 -->
+    <div id="logModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📋 任务执行日志</h3>
+                <button class="modal-close" onclick="closeLogModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="logContent" class="log-content">
+                    <div class="loading">
+                        <div class="spinner"></div> 加载日志中...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 加载运行中的任务
+        async function loadRunningTasks() {
+            try {
+                const response = await fetch('/api/tasks?status=running');
+                const data = await response.json();
+                const tasks = data.tasks;
+
+                const taskList = document.getElementById('runningTasks');
+                if (tasks.length === 0) {
+                    taskList.innerHTML = '<div class="empty">暂无运行中的任务</div>';
+                    return;
+                }
+
+                taskList.innerHTML = tasks.map(task => `
+                    <div class="task-item ${task.status}">
+                        <div class="task-header">
+                            <span class="task-type">${task.type} [${task.category || '未分类'}]</span>
+                            <span class="task-status ${task.status}">
+                                🔄 运行中
+                            </span>
+                        </div>
+                        <div class="task-message">${task.message}</div>
+                        <div class="task-time">
+                            开始时间: ${new Date(task.start_time).toLocaleString('zh-CN')}
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                document.getElementById('runningTasks').innerHTML =
+                    '<div class="empty">加载运行中任务失败</div>';
+            }
+        }
+
+        // 加载已完成的任务
+        async function loadCompletedTasks() {
+            try {
+                const category = document.getElementById('categoryFilter').value;
+                const limit = document.getElementById('limitFilter').value;
+                let url = `/api/tasks/completed?limit=${limit}`;
+                if (category) {
+                    url += `&category=${encodeURIComponent(category)}`;
+                }
+
+                const response = await fetch(url);
+                const data = await response.json();
+                const tasks = data.tasks;
+
+                const taskList = document.getElementById('completedTasks');
+                if (tasks.length === 0) {
+                    taskList.innerHTML = '<div class="empty">暂无已完成的任务</div>';
+                    return;
+                }
+
+                taskList.innerHTML = tasks.map(task => {
+                    // 为留言公开任务过滤掉 skipped_records 和 record_ids
+                    const resultInfo = task.result ? Object.entries(task.result)
+                        .filter(([k, v]) => {
+                            if (task.category === '留言公开') {
+                                return k !== 'skipped_records' && k !== 'record_ids';
+                            }
+                            return true;
+                        })
+                        .map(([k, v]) => `${k}: ${v}`)
+                        .join(' | ') : '';
+
+                    return `
+                        <div class="task-item completed">
+                            <div class="task-header">
+                                <span class="task-type">${task.type} [${task.category || '未分类'}]</span>
+                                <span class="task-status completed">✅ 完成</span>
+                            </div>
+                            <div class="task-message">${task.message}</div>
+                            ${resultInfo ? `<div class="task-result">📈 ${resultInfo}</div>` : ''}
+                            <div class="task-time">
+                                开始: ${new Date(task.start_time).toLocaleString('zh-CN')} |
+                                结束: ${new Date(task.end_time).toLocaleString('zh-CN')}
+                            </div>
+                            ${task.csv_path ? `
+                            <div class="task-csv">
+                                📊 CSV文件: <code>${task.csv_path.split('/').pop()}</code>
+                            </div>
+                            ` : ''}
+                            <div class="task-actions">
+                                <button class="button small" onclick="previewTaskData('${task.task_id}')">预览数据</button>
+                                <button class="button secondary small" onclick="exportTaskData('${task.task_id}')">导出CSV</button>
+                                ${task.category === '留言公开' ? `
+                                <button class="button secondary small" onclick="exportTaskMarkdown('${task.task_id}')">资料导出</button>
+                                ` : ''}
+                                ${task.log_file ? `
+                                <button class="button tertiary small" onclick="viewTaskLog('${task.task_id}')">查看日志</button>
+                                ` : ''}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (error) {
+                document.getElementById('completedTasks').innerHTML =
+                    '<div class="empty">加载已完成任务失败</div>';
+            }
+        }
+
+        // 加载CSV文件列表
+        async function loadFiles() {
+            try {
+                const response = await fetch('/api/files');
+                const data = await response.json();
+                const files = data.files;
+
+                const fileList = document.getElementById('fileList');
+                if (files.length === 0) {
+                    fileList.innerHTML = '<div class="empty">暂无CSV文件</div>';
+                    return;
+                }
+
+                fileList.innerHTML = files.map(file => `
+                    <div class="file-item">
+                        <div class="file-info">
+                            <div class="file-name">📄 ${file.name}</div>
+                            <div class="file-meta">
+                                ${file.rows} 行 | ${file.size_mb} MB |
+                                修改时间: ${new Date(file.modified).toLocaleString('zh-CN')}
+                            </div>
+                        </div>
+                        <div class="file-actions">
+                            <button class="button small" onclick="previewFile('${file.name}')">预览</button>
+                            <button class="button secondary small" onclick="downloadFile('${file.name}')">下载</button>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                document.getElementById('fileList').innerHTML =
+                    '<div class="empty">加载文件列表失败</div>';
+            }
+        }
+
+        // 预览任务数据
+        async function previewTaskData(taskId) {
+            try {
+                const response = await fetch(`/api/tasks/${taskId}/preview?limit=10`);
+                const data = await response.json();
+
+                if (data.count === 0) {
+                    alert(data.message || '该任务没有抓取记录');
+                    return;
+                }
+
+                let preview = `${data.display_name} - 本次抓取记录 (共${data.total_records}条，显示前${data.count}条)\n\n`;
+                data.records.forEach((record, idx) => {
+                    preview += `[${idx + 1}] ` + Object.entries(record).map(([k, v]) => {
+                        // 截断长文本
+                        const val = v && v.length > 50 ? v.substring(0, 50) + '...' : v;
+                        return `${k}: ${val}`;
+                    }).join(' | ') + '\n';
+                });
+
+                alert(preview);
+            } catch (error) {
+                alert('预览失败: ' + error.message);
+            }
+        }
+
+        // 导出任务数据
+        function exportTaskData(taskId) {
+            window.location.href = `/api/tasks/${taskId}/export`;
+        }
+
+        // 导出任务资料为Markdown格式 (仅留言公开)
+        function exportTaskMarkdown(taskId) {
+            window.location.href = `/api/tasks/${taskId}/export-md`;
+        }
+
+        // 预览文件
+        async function previewFile(filename) {
+            try {
+                const response = await fetch(`/api/files/${filename}/preview?limit=10`);
+                const data = await response.json();
+
+                let preview = `文件: ${filename}\n\n`;
+                preview += `列: ${data.headers.join(' | ')}\n`;
+                preview += '-'.repeat(80) + '\n';
+                data.rows.forEach(row => {
+                    preview += row.join(' | ') + '\n';
+                });
+                preview += `\n(显示前 ${data.preview_count} 行)`;
+
+                alert(preview);
+            } catch (error) {
+                alert('预览失败: ' + error.message);
+            }
+        }
+
+        // 下载文件
+        function downloadFile(filename) {
+            window.location.href = `/api/files/${filename}/download`;
+        }
+
+        // 查看任务日志
+        async function viewTaskLog(taskId) {
+            const modal = document.getElementById('logModal');
+            const logContent = document.getElementById('logContent');
+
+            // 显示弹窗和加载状态
+            modal.classList.add('show');
+            logContent.innerHTML = '<div class="loading"><div class="spinner"></div> 加载日志中...</div>';
+
+            try {
+                console.log('Fetching log for task:', taskId);
+                const response = await fetch(`/api/tasks/${taskId}/log`);
+                console.log('Response status:', response.status);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: 获取日志失败`);
+                }
+
+                const data = await response.json();
+                console.log('Data received, log length:', data.log_content ? data.log_content.length : 0);
+
+                if (!data.log_content) {
+                    throw new Error('日志内容为空');
+                }
+
+                let logText = data.log_content;
+
+                // 转义HTML特殊字符
+                logText = logText
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#039;');
+
+                // 简单的日志高亮
+                logText = logText
+                    .replace(/\[INFO\]/g, '<span class="log-info">[INFO]</span>')
+                    .replace(/\[WARNING\]/g, '<span class="log-warning">[WARNING]</span>')
+                    .replace(/\[ERROR\]/g, '<span class="log-error">[ERROR]</span>');
+
+                // 保持换行格式
+                const finalHtml = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-family: monospace; font-size: 13px; line-height: 1.6;">' + logText + '</pre>';
+                console.log('Setting innerHTML, length:', finalHtml.length);
+                logContent.innerHTML = finalHtml;
+                console.log('innerHTML set successfully');
+            } catch (error) {
+                console.error('Error loading log:', error);
+                logContent.innerHTML = `<div style="color: #f48771; padding: 20px;">❌ 加载日志失败: ${error.message}</div>`;
+            }
+        }
+
+        // 关闭日志弹窗
+        function closeLogModal() {
+            document.getElementById('logModal').classList.remove('show');
+        }
+
+        // 点击弹窗外部关闭
+        document.getElementById('logModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeLogModal();
+            }
+        });
+
+        // ESC键关闭弹窗
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeLogModal();
+            }
+        });
+
+        // 初始加载
+        loadRunningTasks();
+        loadCompletedTasks();
+        loadFiles();
+
+        // 定期刷新
+        setInterval(loadRunningTasks, 3000);  // 每3秒刷新运行中任务
+        setInterval(loadCompletedTasks, 10000);  // 每10秒刷新已完成任务
+        setInterval(loadFiles, 10000);  // 每10秒刷新文件列表
+    </script>
+</body>
+</html>
