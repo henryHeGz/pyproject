@@ -3,17 +3,21 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import csv
 import hashlib
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Set, Tuple
+from typing import TYPE_CHECKING, List, Set
+
+# 添加父目录到 Python 路径以导入 db_config
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 if TYPE_CHECKING:  # pragma: no cover - used only for type hints
     from playwright.async_api import Browser, Page
 
+from config.db_config import get_db_cursor
+
 BASE_URL = "https://fgk.chinatax.gov.cn/zcfgk/c100012/listflfg.html"
-CSV_HEADERS = ["序号", "标题", "发文字号", "成文日期", "链接", "是否下载"]
 
 
 @dataclass(frozen=True)
@@ -34,35 +38,34 @@ class Record:
         return hashlib.md5(combined.encode('utf-8')).hexdigest()
 
     @property
-    def csv_row(self) -> List[str]:
-        return [self.sequence, self.title, self.document_no, self.publish_date, self.link, self.downloaded]
-
-    @property
     def unique_key(self) -> str:
         # Using MD5 hash as the unique identifier
         return self.sequence
 
+    def to_dict(self) -> dict:
+        """转换为字典格式，用于数据库插入"""
+        return {
+            "id": self.sequence,
+            "title": self.title,
+            "document_no": self.document_no,
+            "publish_date": self.publish_date,
+            "link": self.link,
+            "downloaded": self.downloaded,
+        }
 
-def load_existing_keys(csv_path: Path) -> Set[str]:
-    """Load the unique keys (MD5 IDs) for previously downloaded records from CSV."""
+
+def load_existing_keys() -> Set[str]:
+    """从数据库加载已存在记录的MD5 ID集合"""
     seen_keys: Set[str] = set()
-    if not csv_path.exists():
-        return seen_keys
 
-    with csv_path.open("r", encoding="utf-8", newline="") as csvfile:
-        reader = csv.DictReader(csvfile)
-        fieldnames = reader.fieldnames or []
+    try:
+        with get_db_cursor() as cursor:
+            cursor.execute("SELECT id FROM flfg_records")
+            for row in cursor.fetchall():
+                seen_keys.add(row["id"])
+    except Exception as e:
+        print(f"⚠️  加载现有数据时出错: {e}")
 
-        # Check for required columns, excluding "链接" for backwards compatibility
-        required_columns = ["序号", "标题", "发文字号", "成文日期"]
-        missing_columns = [column for column in required_columns if column not in fieldnames]
-        if missing_columns:
-            raise ValueError(
-                f"CSV 文件缺少必要的列: {', '.join(missing_columns)}"
-            )
-        for row in reader:
-            # Use the MD5 ID (序号 column) as the unique key
-            seen_keys.add(row["序号"].strip())
     return seen_keys
 
 
@@ -169,7 +172,7 @@ async def goto_next_page(page: "Page") -> bool:
     return True
 
 
-async def scrape(csv_path: Path, headless: bool = True, start_page: int = 1, page_count: int | None = None) -> int:
+async def scrape(headless: bool = True, start_page: int = 1, page_count: int | None = None) -> int:
     try:
         from playwright.async_api import async_playwright
     except ModuleNotFoundError as exc:  # pragma: no cover - exercised in tests via skip
@@ -179,7 +182,7 @@ async def scrape(csv_path: Path, headless: bool = True, start_page: int = 1, pag
         ) from exc
 
     print("正在加载现有数据...")
-    seen_keys = load_existing_keys(csv_path)
+    seen_keys = load_existing_keys()
     print(f"已加载 {len(seen_keys)} 条历史记录")
 
     async with async_playwright() as playwright:
@@ -266,19 +269,19 @@ async def scrape(csv_path: Path, headless: bool = True, start_page: int = 1, pag
         print("正在关闭浏览器...")
         await browser.close()
 
-    if not csv_path.exists():
-        print(f"创建新的 CSV 文件: {csv_path}")
-        with csv_path.open("w", encoding="utf-8-sig", newline="") as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(CSV_HEADERS)
-
+    # 保存新记录到数据库
     if new_records:
-        print(f"正在保存 {len(new_records)} 条新记录到 CSV...")
-        with csv_path.open("a", encoding="utf-8", newline="") as csvfile:
-            writer = csv.writer(csvfile)
-            for record in new_records:
-                writer.writerow(record.csv_row)
-        print("数据保存完成")
+        print(f"正在保存 {len(new_records)} 条新记录到数据库...")
+        try:
+            with get_db_cursor() as cursor:
+                for record in new_records:
+                    cursor.execute("""
+                        INSERT INTO flfg_records (id, title, document_no, publish_date, link, downloaded)
+                        VALUES (%(id)s, %(title)s, %(document_no)s, %(publish_date)s, %(link)s, %(downloaded)s)
+                    """, record.to_dict())
+            print("数据保存完成")
+        except Exception as e:
+            print(f"❌ 保存数据时出错: {e}")
     else:
         print("没有新记录需要保存")
 
@@ -287,12 +290,6 @@ async def scrape(csv_path: Path, headless: bool = True, start_page: int = 1, pag
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="下载国家税务总局法规库法律法规列表数据")
-    parser.add_argument(
-        "--csv",
-        default="chinatax_flfg.csv",
-        type=Path,
-        help="保存数据的 CSV 文件路径 (默认: chinatax_flfg.csv)",
-    )
     parser.add_argument(
         "--headed",
         action="store_true",
@@ -315,14 +312,12 @@ def parse_arguments() -> argparse.Namespace:
 
 async def async_main(args: argparse.Namespace) -> None:
     headless = not args.headed
-    csv_path = args.csv
     new_count = await scrape(
-        csv_path=csv_path,
         headless=headless,
         start_page=args.start_page,
         page_count=args.page_count
     )
-    print(f"新增 {new_count} 条记录，保存至 {csv_path}")
+    print(f"新增 {new_count} 条记录到数据库")
 
 
 def main() -> None:

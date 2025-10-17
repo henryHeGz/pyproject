@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>留言公开 - 正鹏AI数据获取平台</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 导航栏 -->
+        <nav class="navbar">
+            <div class="nav-brand">
+                <h1>🚀 正鹏AI数据获取平台</h1>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="/">首页</a></li>
+                <li><a href="/flfg">法律法规</a></li>
+                <li><a href="/comments" class="active">留言公开</a></li>
+                <li><a href="/tasks">任务管理</a></li>
+            </ul>
+        </nav>
+
+        <!-- 留言公开页面内容 -->
+        <div class="main-content">
+            <div class="header">
+                <h2>💬 留言公开爬虫</h2>
+                <p class="subtitle">抓取和管理公众留言数据</p>
+            </div>
+
+            <div class="grid">
+                <!-- 爬取留言列表 -->
+                <div class="card">
+                    <h3>爬取留言列表</h3>
+                    <form id="commentsForm">
+                        <div class="form-group">
+                            <label>起始页码</label>
+                            <input type="number" name="start_page" value="1" min="1" required>
+                        </div>
+                        <div class="form-group">
+                            <label>最多抓取页数（空=全部）</label>
+                            <input type="number" name="max_pages" min="1" placeholder="留空表示抓取全部">
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" name="headless" id="comments-headless" checked>
+                            <label for="comments-headless" style="margin: 0;">无头模式</label>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" name="auto_download" id="auto-download">
+                            <label for="auto-download" style="margin: 0;">自动下载详情内容</label>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" name="overwrite_db" id="overwrite-db">
+                            <label for="overwrite-db" style="margin: 0;">覆盖数据库已存在的记录</label>
+                        </div>
+                        <button type="submit" class="button">开始爬取</button>
+                    </form>
+                </div>
+
+                <!-- 下载留言详情 -->
+                <div class="card">
+                    <h3>下载留言详情</h3>
+                    <form id="downloadForm">
+                        <div class="form-group">
+                            <label>最多下载数量（空=全部）</label>
+                            <input type="number" name="max_downloads" min="1" placeholder="留空表示下载全部未下载的">
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" name="headless" id="download-headless" checked>
+                            <label for="download-headless" style="margin: 0;">无头模式</label>
+                        </div>
+                        <button type="submit" class="button secondary">开始下载</button>
+                    </form>
+                </div>
+
+                <!-- 数据库预览 -->
+                <div class="card full-width">
+                    <h3>数据库预览</h3>
+                    <div class="stat-row">
+                        <div class="stat-item">
+                            总记录数: <strong id="comments-total">-</strong>
+                        </div>
+                        <div class="stat-item">
+                            已下载: <strong id="comments-downloaded">-</strong>
+                        </div>
+                        <div class="stat-item">
+                            未下载: <strong id="comments-not-downloaded">-</strong>
+                        </div>
+                        <div style="margin-left: auto; display: flex; gap: 10px; align-items: center;">
+                            <label style="font-weight: 500;">筛选:</label>
+                            <select id="downloadFilter" class="filter-select" onchange="applyFilter()">
+                                <option value="all">全部</option>
+                                <option value="Y">已下载</option>
+                                <option value="N">未下载</option>
+                            </select>
+                            <button class="button secondary small" onclick="refreshPreview()">刷新预览</button>
+                        </div>
+                    </div>
+                    <div class="export-controls" style="margin: 15px 0; display: flex; gap: 10px; align-items: center;">
+                        <button class="button small" onclick="exportAllMD()">📄 导出全部</button>
+                        <button class="button secondary small" onclick="exportSelectedMD()">📋 导出选中</button>
+                        <span style="margin-left: 10px; color: #666; font-size: 14px;">
+                            已选中: <strong id="selectedCount">0</strong> 条
+                        </span>
+                    </div>
+                    <div id="previewTable" class="table-container">
+                        <div class="loading">
+                            <div class="spinner"></div> 加载中...
+                        </div>
+                    </div>
+                    <div id="pagination" class="pagination" style="display: none;">
+                        <div class="pagination-controls">
+                            <button onclick="changePage('first')" id="firstBtn">首页</button>
+                            <button onclick="changePage('prev')" id="prevBtn">上一页</button>
+                            <span class="pagination-info">
+                                第 <span id="currentPage">1</span> / <span id="totalPages">1</span> 页
+                            </span>
+                            <button onclick="changePage('next')" id="nextBtn">下一页</button>
+                            <button onclick="changePage('last')" id="lastBtn">末页</button>
+                        </div>
+                        <div class="pagination-meta">
+                            <span class="pagination-total">共 <span id="totalRecords">0</span> 条</span>
+                            <select class="page-size-select" id="pageSizeSelect" onchange="changePageSize()">
+                                <option value="10" selected>10条/页</option>
+                                <option value="20">20条/页</option>
+                                <option value="50">50条/页</option>
+                                <option value="100">100条/页</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 最近任务 -->
+                <div class="card full-width">
+                    <h3>最近任务</h3>
+                    <div id="recentTasks" class="task-list">
+                        <div class="loading">
+                            <div class="spinner"></div> 加载中...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 分页状态
+        let currentPage = 1;
+        let pageSize = 10;
+        let totalPages = 1;
+        let currentFilter = 'all';  // 当前筛选状态
+        let selectedRecords = new Set();  // 存储选中的记录ID
+
+        // 更新选中计数
+        function updateSelectedCount() {
+            document.getElementById('selectedCount').textContent = selectedRecords.size;
+        }
+
+        // 全选/取消全选
+        function toggleSelectAll(checkbox) {
+            const checkboxes = document.querySelectorAll('.record-checkbox');
+            checkboxes.forEach(cb => {
+                cb.checked = checkbox.checked;
+                if (checkbox.checked) {
+                    selectedRecords.add(cb.dataset.recordId);
+                } else {
+                    selectedRecords.delete(cb.dataset.recordId);
+                }
+            });
+            updateSelectedCount();
+        }
+
+        // 切换单个记录选中状态
+        function toggleRecord(checkbox) {
+            if (checkbox.checked) {
+                selectedRecords.add(checkbox.dataset.recordId);
+            } else {
+                selectedRecords.delete(checkbox.dataset.recordId);
+            }
+            updateSelectedCount();
+        }
+
+        // 导出全部为MD
+        async function exportAllMD() {
+            if (!confirm('确定要导出全部留言记录为Markdown格式吗？')) {
+                return;
+            }
+            try {
+                window.location.href = '/api/comments/export-all-md';
+            } catch (error) {
+                alert('导出失败: ' + error.message);
+            }
+        }
+
+        // 导出选中为MD
+        async function exportSelectedMD() {
+            if (selectedRecords.size === 0) {
+                alert('请先选择要导出的记录');
+                return;
+            }
+            try {
+                const response = await fetch('/api/comments/export-selected-md', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        record_ids: Array.from(selectedRecords)
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('导出失败');
+                }
+
+                // 下载文件
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `selected_qa_${new Date().getTime()}.md`;
+                a.click();
+                window.URL.revokeObjectURL(url);
+            } catch (error) {
+                alert('导出失败: ' + error.message);
+            }
+        }
+
+        // 导出单条为MD
+        function exportSingleMD(recordId) {
+            window.location.href = `/api/comments/export-single-md/${recordId}`;
+        }
+
+        // 提交爬取任务
+        document.getElementById('commentsForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const data = {
+                start_page: parseInt(formData.get('start_page')),
+                max_pages: formData.get('max_pages') ? parseInt(formData.get('max_pages')) : null,
+                headless: formData.get('headless') === 'on',
+                auto_download: formData.get('auto_download') === 'on',
+                overwrite_db: formData.get('overwrite_db') === 'on'
+            };
+            await submitTask('/api/comments/scrape', data, '留言爬取任务');
+        });
+
+        // 提交下载任务
+        document.getElementById('downloadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const data = {
+                max_downloads: formData.get('max_downloads') ? parseInt(formData.get('max_downloads')) : null,
+                headless: formData.get('headless') === 'on'
+            };
+            await submitTask('/api/comments/download', data, '留言下载任务');
+        });
+
+        async function submitTask(url, data, taskName) {
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+                alert(`${taskName}已提交！\n任务ID: ${result.task_id}\n\n您可以在"任务管理"页面查看执行进度`);
+                loadRecentTasks();
+            } catch (error) {
+                alert('任务提交失败: ' + error.message);
+            }
+        }
+
+        // 加载数据库统计
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/database/stats');
+                const data = await response.json();
+                const commentsTable = data.tables.find(t => t.name === 'comment_records');
+
+                if (commentsTable) {
+                    document.getElementById('comments-total').textContent = commentsTable.total_rows.toLocaleString();
+                    document.getElementById('comments-downloaded').textContent = commentsTable.downloaded.toLocaleString();
+                    document.getElementById('comments-not-downloaded').textContent = commentsTable.not_downloaded.toLocaleString();
+                }
+            } catch (error) {
+                console.error('加载统计失败:', error);
+            }
+        }
+
+        // 加载预览数据
+        async function loadPreview(page = currentPage, size = pageSize, filter = currentFilter) {
+            try {
+                // 构建URL参数
+                let url = `/api/records/comments/preview?page=${page}&page_size=${size}`;
+                if (filter !== 'all') {
+                    url += `&downloaded_filter=${filter}`;
+                }
+
+                const response = await fetch(url);
+                const data = await response.json();
+
+                // 更新分页状态
+                currentPage = data.page;
+                pageSize = data.page_size;
+                totalPages = data.total_pages;
+                currentFilter = filter;
+
+                const previewTable = document.getElementById('previewTable');
+                const pagination = document.getElementById('pagination');
+
+                if (data.count === 0) {
+                    previewTable.innerHTML = '<div class="empty">暂无记录</div>';
+                    pagination.style.display = 'none';
+                    return;
+                }
+
+                // 显示分页控件
+                pagination.style.display = 'flex';
+                document.getElementById('currentPage').textContent = currentPage;
+                document.getElementById('totalPages').textContent = totalPages;
+                document.getElementById('totalRecords').textContent = data.total.toLocaleString();
+
+                // 更新按钮状态
+                document.getElementById('firstBtn').disabled = currentPage === 1;
+                document.getElementById('prevBtn').disabled = currentPage === 1;
+                document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+                document.getElementById('lastBtn').disabled = currentPage >= totalPages;
+
+                // 渲染表格
+                let tableHtml = '<table class="data-table"><thead><tr>';
+                tableHtml += '<th><input type="checkbox" onclick="toggleSelectAll(this)" title="全选/取消全选"></th>';
+                tableHtml += '<th>操作</th>';
+                const headers = Object.keys(data.records[0]).filter(h => h !== 'id');
+                headers.forEach(h => {
+                    tableHtml += `<th>${h}</th>`;
+                });
+                tableHtml += '</tr></thead><tbody>';
+
+                data.records.forEach(record => {
+                    const recordId = record.id;
+                    tableHtml += '<tr>';
+                    // 复选框列
+                    tableHtml += `<td><input type="checkbox" class="record-checkbox" data-record-id="${recordId}" onclick="toggleRecord(this)" ${selectedRecords.has(recordId) ? 'checked' : ''}></td>`;
+                    // 操作列
+                    tableHtml += `<td><button class="button small" onclick="exportSingleMD('${recordId}')" style="font-size: 12px; padding: 4px 8px;">导出</button></td>`;
+
+                    headers.forEach(h => {
+                        let value = record[h];
+                        if (h === '链接地址' && value) {
+                            value = `<a href="${value}" target="_blank" class="link">查看</a>`;
+                        } else if (h === '是否下载') {
+                            value = value === 'Y' ? '✅' : '⏳';
+                        } else if ((h === '问的内容' || h === '答的内容') && value) {
+                            // 截断长文本
+                            value = value.length > 50 ? value.substring(0, 50) + '...' : value;
+                        }
+                        tableHtml += `<td>${value || '-'}</td>`;
+                    });
+                    tableHtml += '</tr>';
+                });
+
+                tableHtml += '</tbody></table>';
+                previewTable.innerHTML = tableHtml;
+            } catch (error) {
+                document.getElementById('previewTable').innerHTML =
+                    '<div class="empty">加载预览失败</div>';
+            }
+        }
+
+        // 翻页控制
+        function changePage(action) {
+            let newPage = currentPage;
+
+            switch(action) {
+                case 'first':
+                    newPage = 1;
+                    break;
+                case 'prev':
+                    newPage = Math.max(1, currentPage - 1);
+                    break;
+                case 'next':
+                    newPage = Math.min(totalPages, currentPage + 1);
+                    break;
+                case 'last':
+                    newPage = totalPages;
+                    break;
+            }
+
+            if (newPage !== currentPage) {
+                loadPreview(newPage, pageSize, currentFilter);  // 保持筛选状态
+            }
+        }
+
+        // 改变每页显示数量
+        function changePageSize() {
+            const select = document.getElementById('pageSizeSelect');
+            pageSize = parseInt(select.value);
+            loadPreview(1, pageSize, currentFilter);  // 重置到第一页，保持筛选状态
+        }
+
+        // 应用筛选
+        function applyFilter() {
+            const filterSelect = document.getElementById('downloadFilter');
+            currentFilter = filterSelect.value;
+            loadPreview(1, pageSize, currentFilter);  // 筛选后重置到第一页
+        }
+
+        // 加载最近任务
+        async function loadRecentTasks() {
+            try {
+                const response = await fetch('/api/tasks?category=留言公开&limit=10');
+                const data = await response.json();
+                const tasks = data.tasks;
+
+                const taskList = document.getElementById('recentTasks');
+                if (tasks.length === 0) {
+                    taskList.innerHTML = '<div class="empty">暂无最近任务</div>';
+                    return;
+                }
+
+                taskList.innerHTML = tasks.map(task => `
+                    <div class="task-item ${task.status}">
+                        <div class="task-header">
+                            <span class="task-type">${task.type}</span>
+                            <span class="task-status ${task.status}">
+                                ${task.status === 'running' ? '🔄 运行中' :
+                                  task.status === 'completed' ? '✅ 完成' :
+                                  '❌ 失败'}
+                            </span>
+                        </div>
+                        <div class="task-message">${task.message}</div>
+                        <div class="task-time">
+                            ${new Date(task.start_time).toLocaleString('zh-CN')}
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                document.getElementById('recentTasks').innerHTML =
+                    '<div class="empty">加载最近任务失败</div>';
+            }
+        }
+
+        function refreshPreview() {
+            loadStats();
+            loadPreview();
+        }
+
+        // 初始加载
+        loadStats();
+        loadPreview();
+        loadRecentTasks();
+
+        // 定期刷新
+        setInterval(loadStats, 30000);  // 每30秒刷新统计
+        setInterval(loadRecentTasks, 10000);  // 每10秒刷新任务
+    </script>
+</body>
+</html>

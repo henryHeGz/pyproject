@@ -1,81 +1,53 @@
-"""调度器：从CSV读取记录并调用chinatax_document_downloader下载文档。"""
+"""调度器：从数据库读取记录并调用chinatax_document_downloader下载文档。"""
 from __future__ import annotations
 
 import argparse
 import asyncio
-import csv
 import sys
 from pathlib import Path
 from typing import List
 
+# 添加父目录到 Python 路径以导入 db_config
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from config.db_config import get_db_cursor
 from chinatax_document_downloader import scrape_document
 
 
-def load_csv_records(csv_path: Path) -> List[dict]:
-    """读取CSV文件并返回所有记录。"""
-    if not csv_path.exists():
-        raise FileNotFoundError(f"CSV文件不存在: {csv_path}")
-
+def load_all_records() -> List[dict]:
+    """从数据库读取所有记录"""
     records = []
-    with csv_path.open("r", encoding="utf-8", newline="") as csvfile:
-        reader = csv.DictReader(csvfile)
-        fieldnames = reader.fieldnames or []
-
-        # 检查必要的列
-        required_columns = ["序号", "标题", "发文字号", "成文日期", "链接"]
-        missing_columns = [column for column in required_columns if column not in fieldnames]
-        if missing_columns:
-            raise ValueError(f"CSV 文件缺少必要的列: {', '.join(missing_columns)}")
-
-        # 如果没有"是否下载"列，添加提示
-        if "是否下载" not in fieldnames:
-            print("警告: CSV文件缺少'是否下载'列，将视所有记录为未下载")
-
-        for row in reader:
-            records.append(row)
-
+    try:
+        with get_db_cursor() as cursor:
+            cursor.execute("""
+                SELECT id as 序号, title as 标题, document_no as 发文字号,
+                       publish_date as 成文日期, link as 链接, downloaded as 是否下载
+                FROM flfg_records
+                ORDER BY created_at DESC
+            """)
+            records = cursor.fetchall()
+    except Exception as e:
+        print(f"❌ 读取数据库记录时出错: {e}")
     return records
 
 
-def update_csv_record(csv_path: Path, sequence_id: str, downloaded_status: str = "Y") -> None:
-    """更新CSV中指定记录的下载状态。
+def update_record_status(record_id: str, downloaded_status: str = "Y") -> None:
+    """更新数据库中指定记录的下载状态
 
     Args:
-        csv_path: CSV文件路径
-        sequence_id: 记录的序号(MD5)
+        record_id: 记录的序号(MD5)
         downloaded_status: 下载状态，默认为"Y"
     """
-    if not csv_path.exists():
-        return
-
-    # 读取所有记录
-    all_rows = []
-    fieldnames = []
-    with csv_path.open("r", encoding="utf-8", newline="") as csvfile:
-        reader = csv.DictReader(csvfile)
-        fieldnames = reader.fieldnames or []
-
-        # 确保有"是否下载"列
-        if "是否下载" not in fieldnames:
-            fieldnames.append("是否下载")
-
-        for row in reader:
-            # 如果没有"是否下载"字段，添加默认值
-            if "是否下载" not in row:
-                row["是否下载"] = "N"
-
-            # 更新匹配的记录
-            if row["序号"] == sequence_id:
-                row["是否下载"] = downloaded_status
-                print(f"  更新记录 {sequence_id} 的下载状态为: {downloaded_status}")
-
-            all_rows.append(row)
-
-    # 写回CSV
-    with csv_path.open("w", encoding="utf-8", newline="") as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(all_rows)
+    try:
+        with get_db_cursor() as cursor:
+            cursor.execute("""
+                UPDATE flfg_records
+                SET downloaded = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+            """, (downloaded_status, record_id))
+            print(f"  更新记录 {record_id} 的下载状态为: {downloaded_status}")
+    except Exception as e:
+        print(f"❌ 更新记录状态时出错: {e}")
 
 
 def filter_records_by_ids(records: List[dict], ids: List[str]) -> List[dict]:
@@ -131,12 +103,11 @@ async def download_record(record: dict, output_dir: Path, headless: bool = True)
 
 async def async_main(args: argparse.Namespace) -> None:
     """主函数。"""
-    csv_path = args.csv
     output_dir = args.output_dir
     headless = not args.headed
 
-    print(f"正在读取CSV文件: {csv_path}")
-    records = load_csv_records(csv_path)
+    print(f"正在读取数据库记录...")
+    records = load_all_records()
     print(f"共读取 {len(records)} 条记录")
 
     # 根据参数过滤记录
@@ -177,8 +148,8 @@ async def async_main(args: argparse.Namespace) -> None:
 
         if success:
             success_count += 1
-            # 更新CSV状态
-            update_csv_record(csv_path, record["序号"], "Y")
+            # 更新数据库状态
+            update_record_status(record["序号"], "Y")
         else:
             fail_count += 1
             # 如果设置了fail-on-error，则停止
@@ -195,7 +166,7 @@ async def async_main(args: argparse.Namespace) -> None:
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="调度器：从CSV读取记录并下载文档",
+        description="调度器：从数据库读取记录并下载文档",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -214,12 +185,6 @@ def parse_arguments() -> argparse.Namespace:
   # 指定输出目录
   python chinatax_scheduler.py --output-dir ./downloads --not-downloaded
         """
-    )
-    parser.add_argument(
-        "--csv",
-        default="chinatax_flfg.csv",
-        type=Path,
-        help="CSV文件路径 (默认: chinatax_flfg.csv)",
     )
     parser.add_argument(
         "--output-dir",

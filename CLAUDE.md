@@ -4,78 +4,135 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Python-based web scraper that uses Playwright to collect Chinese tax law and regulation data from the 国家税务总局法规库 (State Taxation Administration Legal Database). The scraper downloads list data (title, document number, publication date) and saves it to CSV with automatic deduplication.
+This is a Python-based web scraper that uses Playwright to collect Chinese tax law and regulation data from the 国家税务总局法规库 (State Taxation Administration Legal Database) and 留言公开 (Public Comments). The scrapers store data in a database (PostgreSQL or SQLite) with automatic deduplication. A web management interface provides task management and CSV export functionality.
 
 ## Development Commands
 
 ### Installation
 ```bash
-pip install .
+pip install -e .
 playwright install
 ```
 
-### Running the scraper
+### Running the web management interface
 ```bash
-# Direct execution
-python chinatax_scraper.py
+# Start the FastAPI web server
+python web_app.py
 
-# Or via console script entry point
-chinatax-scraper
+# Access the web interface at http://localhost:8000
+# API documentation at http://localhost:8000/docs
+```
 
-# With options
-chinatax-scraper --csv output.csv --headed
+### Running scrapers directly
+```bash
+# Run 法律法规 scraper
+python flfg_scraper/chinatax_scraper.py --start-page 1 --page-count 5
+
+# Run 留言公开 scraper
+python comments_scraper/chinatax_comments_scraper.py --start-page 1 --max-pages 5
 ```
 
 ### Testing
 ```bash
 # Run all tests
-python -m unittest tests/test_scraper.py
+python -m unittest discover tests
 
-# Run specific test class
-python -m unittest tests.test_scraper.RecordTests
-
-# Run individual test
-python -m unittest tests.test_scraper.RecordTests.test_csv_row_matches_order
+# Run specific test module
+python -m unittest tests.test_scraper
 ```
 
 ## Architecture
 
-The scraper is a single-module application ([chinatax_scraper.py](chinatax_scraper.py)) with the following core components:
+### Core Components
 
-**Data Model (`Record` dataclass):**
-- Immutable container for scraped records (sequence, title, document_no, publish_date)
-- `unique_key` property uses title + document number for deduplication (not sequence, since new rows can be inserted at the top of the list)
+**Web Application ([web_app.py](web_app.py)):**
+- FastAPI-based management interface for all scraping tasks
+- Task management with database persistence
+- CSV export functionality with unique file naming
+- Background task execution for long-running operations
 
-**Deduplication Strategy:**
-- `load_existing_keys()` reads existing CSV and returns set of (title, document_no) tuples
-- Main scrape loop checks each record's `unique_key` against seen keys before adding
-- Only new records are appended to CSV
+**CSV File Management ([csv_manager.py](csv_manager.py)):**
+- Centralized CSV file path generation and management
+- All CSV exports stored in `csv_exports/` directory
+- Unique filename format: `{task_name}_{YYMMDDHHmmss}_{4-char-random}.csv`
+- Never stores CSV files in project root directory
 
-**Extraction Logic (`extract_records()`):**
-- Primary strategy: extract from `<table><tbody><tr>` structure
-- Fallback strategy: extract from `<li>` with `<span>` elements
-- Both strategies filter out header rows (where 序号 column contains literal "序号")
+**Database Layer ([db_config.py](db_config.py)):**
+- Supports both PostgreSQL and SQLite
+- Auto-detection via `DB_TYPE` environment variable
+- Provides `get_db_cursor()` context manager for all database operations
 
-**Pagination (`goto_next_page()`):**
-- Locates "下一页" (Next Page) link
-- Checks if disabled via class attribute or aria-disabled
-- Clicks and waits for networkidle before continuing
+**法律法规 Scraper ([flfg_scraper/chinatax_scraper.py](flfg_scraper/chinatax_scraper.py)):**
+- Extracts from `<li>` structure on list pages
+- Uses MD5 hash of (title + document_no + publish_date + link) as unique ID
+- Stores records directly to `flfg_records` database table
+- Supports pagination and incremental updates
 
-**Main Flow (`scrape()`):**
-1. Load existing keys from CSV (if file exists)
-2. Launch Chromium browser
-3. Visit BASE_URL and wait for networkidle
-4. Extract records from current page, filter duplicates
-5. Navigate to next page if available, repeat extraction
-6. Close browser
-7. Create CSV with headers if it doesn't exist
-8. Append new records to CSV
-9. Return count of newly added records
+**留言公开 Scraper ([comments_scraper/chinatax_comments_scraper.py](comments_scraper/chinatax_comments_scraper.py)):**
+- Extracts comment list and detail pages
+- Uses MD5 hash of (question + date + link) as unique ID
+- Stores records directly to `comment_records` database table
+- Auto-download option for fetching full comment content
+
+### Data Model
+
+**Record (法律法规):**
+- `id` (MD5 hash): Unique identifier
+- `title`: Document title
+- `document_no`: Official document number
+- `publish_date`: Publication date
+- `link`: Full URL to document
+- `downloaded`: Status flag ("Y" or "N")
+
+**CommentRecord (留言公开):**
+- `id` (MD5 hash): Unique identifier
+- `question`: Comment title/question
+- `date`: Comment date
+- `link`: Full URL to comment
+- `downloaded`: Status flag ("Y" or "N")
+- `question_content`: Full question text
+- `answer_content`: Official answer text
+
+### Deduplication Strategy
+
+- Database-driven: `load_existing_keys()` / `load_existing_ids()` query existing records
+- MD5 hash-based unique IDs prevent duplicate insertions
+- Scraper stops when duplicate records are encountered (incremental mode)
+
+### CSV Export System
+
+**Location:** All CSV files are stored in `csv_exports/` directory (never in project root)
+
+**Naming Convention:** `{task_name}_{timestamp}_{random}.csv`
+- `task_name`: Descriptive task identifier (e.g., "flfg", "comments", "export_法律法规")
+- `timestamp`: YYMMDDHHmmss format
+- `random`: 4-character alphanumeric suffix for uniqueness
+
+**Example filenames:**
+- `flfg_25101708304_a3f2.csv`
+- `comments_251017083512_x9k1.csv`
+- `export_法律法规_251017084235_k7m3.csv`
+
+**Usage:**
+```python
+from csv_manager import get_csv_path, list_csv_files, CSV_EXPORTS_DIR
+
+# Generate new CSV path
+csv_path = get_csv_path("my_task")  # Returns: csv_exports/my_task_251017083045_x7a2.csv
+
+# List all CSV files
+files = list_csv_files()  # Returns sorted list by modification time
+
+# Get latest CSV for specific task
+latest = get_latest_csv("flfg")
+```
 
 ## Important Implementation Details
 
-- **Type checking:** Uses `TYPE_CHECKING` guard for Playwright imports to avoid runtime dependency in type hints
-- **Error handling:** Playwright import wrapped in try/except with localized error message
-- **Network constraints:** README documents workarounds for restricted network environments (offline installation, proxies, mirrors)
-- **CSV encoding:** Always uses UTF-8 with newline="" for cross-platform compatibility
-- **Async execution:** All scraping logic is async, entry point uses `asyncio.run()`
+- **Database persistence:** All scraped data stored in database, not CSV files
+- **CSV exports:** Only used for user downloads, generated on-demand with unique filenames
+- **Type checking:** Uses `TYPE_CHECKING` guard for Playwright imports
+- **Error handling:** Comprehensive exception handling with user-friendly messages
+- **Async execution:** All scraping operations are async using `asyncio`
+- **Background tasks:** FastAPI BackgroundTasks for non-blocking operations
+- **Auto-detection:** Database type auto-detected from environment

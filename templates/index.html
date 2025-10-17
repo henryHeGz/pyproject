@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>正鹏AI数据获取平台</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 导航栏 -->
+        <nav class="navbar">
+            <div class="nav-brand">
+                <h1>🚀 正鹏AI数据获取平台</h1>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="/" class="active">首页</a></li>
+                <li><a href="/flfg">法律法规</a></li>
+                <li><a href="/comments">留言公开</a></li>
+                <li><a href="/tasks">任务管理</a></li>
+            </ul>
+        </nav>
+
+        <!-- 主页内容 -->
+        <div class="main-content">
+            <div class="header">
+                <h2>欢迎使用爬虫管理系统</h2>
+                <p class="subtitle">方便地管理和运行税务数据爬虫任务</p>
+            </div>
+
+            <!-- 数据库统计卡片 -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">📚</div>
+                    <div class="stat-content">
+                        <div class="stat-title">法律法规记录</div>
+                        <div class="stat-value" id="flfg-total">-</div>
+                        <div class="stat-meta">
+                            已下载: <span id="flfg-downloaded">-</span> |
+                            未下载: <span id="flfg-not-downloaded">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon">💬</div>
+                    <div class="stat-content">
+                        <div class="stat-title">留言公开记录</div>
+                        <div class="stat-value" id="comments-total">-</div>
+                        <div class="stat-meta">
+                            已下载: <span id="comments-downloaded">-</span> |
+                            未下载: <span id="comments-not-downloaded">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon">⚙️</div>
+                    <div class="stat-content">
+                        <div class="stat-title">运行中任务</div>
+                        <div class="stat-value" id="running-tasks">-</div>
+                        <div class="stat-meta">实时更新</div>
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon">✅</div>
+                    <div class="stat-content">
+                        <div class="stat-title">已完成任务</div>
+                        <div class="stat-value" id="completed-tasks">-</div>
+                        <div class="stat-meta">最近24小时</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 快捷操作 -->
+            <div class="card">
+                <h3>快捷操作</h3>
+                <div class="quick-actions">
+                    <a href="/flfg" class="action-button">
+                        <div class="action-icon">📚</div>
+                        <div class="action-text">
+                            <div class="action-title">法律法规爬虫</div>
+                            <div class="action-desc">抓取和管理法律法规数据</div>
+                        </div>
+                    </a>
+                    <a href="/comments" class="action-button">
+                        <div class="action-icon">💬</div>
+                        <div class="action-text">
+                            <div class="action-title">留言公开爬虫</div>
+                            <div class="action-desc">抓取和管理公众留言数据</div>
+                        </div>
+                    </a>
+                    <a href="/tasks" class="action-button">
+                        <div class="action-icon">📊</div>
+                        <div class="action-text">
+                            <div class="action-title">任务管理</div>
+                            <div class="action-desc">查看和管理所有爬虫任务</div>
+                        </div>
+                    </a>
+                </div>
+            </div>
+
+            <!-- 最近活动 -->
+            <div class="card">
+                <h3>最近活动</h3>
+                <div id="recent-tasks" class="task-list">
+                    <div class="loading">
+                        <div class="spinner"></div> 加载中...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 加载数据库统计
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/database/stats');
+                const data = await response.json();
+
+                // 更新法律法规统计
+                const flfgTable = data.tables.find(t => t.name === 'flfg_records');
+                if (flfgTable) {
+                    document.getElementById('flfg-total').textContent = flfgTable.total_rows.toLocaleString();
+                    document.getElementById('flfg-downloaded').textContent = flfgTable.downloaded.toLocaleString();
+                    document.getElementById('flfg-not-downloaded').textContent = flfgTable.not_downloaded.toLocaleString();
+                }
+
+                // 更新留言统计
+                const commentsTable = data.tables.find(t => t.name === 'comment_records');
+                if (commentsTable) {
+                    document.getElementById('comments-total').textContent = commentsTable.total_rows.toLocaleString();
+                    document.getElementById('comments-downloaded').textContent = commentsTable.downloaded.toLocaleString();
+                    document.getElementById('comments-not-downloaded').textContent = commentsTable.not_downloaded.toLocaleString();
+                }
+            } catch (error) {
+                console.error('加载统计失败:', error);
+            }
+        }
+
+        // 加载任务统计
+        async function loadTaskStats() {
+            try {
+                const runningResp = await fetch('/api/tasks?status=running');
+                const runningData = await runningResp.json();
+                document.getElementById('running-tasks').textContent = runningData.tasks.length;
+
+                const completedResp = await fetch('/api/tasks/completed?limit=50');
+                const completedData = await completedResp.json();
+                document.getElementById('completed-tasks').textContent = completedData.tasks.length;
+            } catch (error) {
+                console.error('加载任务统计失败:', error);
+            }
+        }
+
+        // 加载最近任务
+        async function loadRecentTasks() {
+            try {
+                const response = await fetch('/api/tasks?limit=5');
+                const data = await response.json();
+                const tasks = data.tasks;
+
+                const taskList = document.getElementById('recent-tasks');
+                if (tasks.length === 0) {
+                    taskList.innerHTML = '<div class="empty">暂无最近任务</div>';
+                    return;
+                }
+
+                taskList.innerHTML = tasks.map(task => `
+                    <div class="task-item ${task.status}">
+                        <div class="task-header">
+                            <span class="task-type">${task.type} [${task.category || '未分类'}]</span>
+                            <span class="task-status ${task.status}">
+                                ${task.status === 'running' ? '🔄 运行中' :
+                                  task.status === 'completed' ? '✅ 完成' :
+                                  '❌ 失败'}
+                            </span>
+                        </div>
+                        <div class="task-message">${task.message}</div>
+                        <div class="task-time">
+                            ${new Date(task.start_time).toLocaleString('zh-CN')}
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                document.getElementById('recent-tasks').innerHTML =
+                    '<div class="empty">加载最近任务失败</div>';
+            }
+        }
+
+        // 初始加载
+        loadStats();
+        loadTaskStats();
+        loadRecentTasks();
+
+        // 定期刷新
+        setInterval(loadStats, 30000);  // 每30秒刷新统计
+        setInterval(loadTaskStats, 5000);  // 每5秒刷新任务统计
+        setInterval(loadRecentTasks, 10000);  // 每10秒刷新最近任务
+    </script>
+</body>
+</html>
