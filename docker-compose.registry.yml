@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  chinatax-scraper2:
+    image: crpi-9udrgpeh6e3r59wi.cn-guangzhou.personal.cr.aliyuncs.com/test_20250806/zpaidata:2.0
+    container_name: chinatax-scraper-registry
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./csv_exports:/app/csv_exports
+      - ./flfg_downloads:/app/flfg_downloads
+      - ./logs:/app/logs
+    environment:
+      - DB_TYPE=sqlite
+      - SQLITE_DB_PATH=/app/data/chinatax.db
+      - PYTHONUNBUFFERED=1
+      - TZ=Asia/Shanghai          # ← 新增：目标时区
+    restart: unless-stopped
+

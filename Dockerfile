@@ -1,15 +1,7 @@
-# 多阶段构建 - Stage 1: 基础镜像
-FROM python:3.11-slim AS base
-
+# 使用 Playwright 官方镜像作为基座（已包含浏览器和所有依赖）
+FROM mcr.microsoft.com/playwright/python:v1.55.0-noble AS base
 # 设置工作目录
 WORKDIR /app
-
-# 安装基础系统依赖
-RUN apt-get update && apt-get install -y \
-    wget \
-    gnupg \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
 
 # Stage 2: 依赖安装
 FROM base AS dependencies
@@ -17,13 +9,13 @@ FROM base AS dependencies
 # 复制应用代码（需要在安装前复制，因为 pyproject.toml 依赖这些目录）
 COPY . .
 
+# 配置 pip 使用国内镜像源（可选，加速安装）
+RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && \
+    pip config set install.trusted-host mirrors.aliyun.com
+
 # 安装Python依赖
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -e .
-
-# 安装Playwright浏览器
-RUN playwright install chromium && \
-    playwright install-deps chromium
 
 # Stage 3: 最终镜像
 FROM dependencies AS final

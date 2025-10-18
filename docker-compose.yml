@@ -3,6 +3,7 @@ version: '3.8'
 services:
   # 主应用服务（使用SQLite）
   chinatax-scraper:
+    # image: crpi-9udrgpeh6e3r59wi.cn-guangzhou.personal.cr.aliyuncs.com/test_20250806/zpaidata:0.1
     build:
       context: .
       dockerfile: Dockerfile

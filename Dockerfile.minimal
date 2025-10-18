@@ -1,0 +1,52 @@
+# 极简版 Dockerfile - 最小化镜像大小
+# 预计镜像大小: 800MB-1.0GB
+# 使用多阶段构建 + 仅保留运行时必需的文件
+
+# Stage 1: 构建阶段
+FROM mcr.microsoft.com/playwright/python:v1.49.0-jammy AS builder
+
+WORKDIR /app
+
+# 仅复制依赖文件
+COPY pyproject.toml ./
+COPY flfg_scraper ./flfg_scraper
+COPY comments_scraper ./comments_scraper
+
+# 安装依赖
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -e .
+
+# Stage 2: 运行阶段（精简）
+FROM mcr.microsoft.com/playwright/python:v1.49.0-jammy
+
+WORKDIR /app
+
+# 从构建阶段复制 Python 包
+COPY --from=builder /usr/local/lib/python3.*/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# 复制应用代码（仅必需文件）
+COPY flfg_scraper ./flfg_scraper
+COPY comments_scraper ./comments_scraper
+COPY web_app.py docker_entrypoint.py db_config.py csv_manager.py ./
+COPY templates ./templates
+COPY static ./static
+
+# 创建必要的目录
+RUN mkdir -p csv_exports flfg_downloads logs /app/data
+
+# 设置环境变量
+ENV PYTHONUNBUFFERED=1 \
+    DB_TYPE=sqlite \
+    SQLITE_DB_PATH=/app/data/chinatax.db \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+# 暴露端口
+EXPOSE 8000
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:8000/api/database/stats')" || exit 1
+
+# 启动命令
+CMD ["python", "docker_entrypoint.py"]

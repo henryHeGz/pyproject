@@ -1,0 +1,37 @@
+version: '3.8'
+
+x-bake:
+  chinatax-scraper:
+    context: .
+    dockerfile: Dockerfile
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    tags:
+      - chinatax-scraper:multiarch
+
+services:
+  chinatax-scraper:
+    image: chinatax-scraper:multiarch
+    container_name: chinatax-scraper-multiarch
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./csv_exports:/app/csv_exports
+      - ./flfg_downloads:/app/flfg_downloads
+      - ./logs:/app/logs
+    environment:
+      - DB_TYPE=sqlite
+      - SQLITE_DB_PATH=/app/data/chinatax.db
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    networks:
+      - chinatax-network
+
+networks:
+  chinatax-network:
+    driver: bridge
